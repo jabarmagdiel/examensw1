@@ -1,0 +1,71 @@
+version: '3.8'
+
+services:
+  # 1. Base de Datos Relacional PostgreSQL 16
+  postgres:
+    image: postgres:16-alpine
+    container_name: case_enterprise_postgres
+    restart: unless-stopped
+    ports:
+      - "5432:5432"
+    environment:
+      POSTGRES_DB: case_db
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: casepassword2026
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./backend/init.sql:/docker-entrypoint-initdb.d/init.sql:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d case_db"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 5s
+    networks:
+      - case_network
+
+  # 2. Servicio de Backend (API REST + Sockets en tiempo real)
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    container_name: case_enterprise_backend
+    restart: unless-stopped
+    ports:
+      - "3001:3001"
+    environment:
+      - PORT=3001
+      - NODE_ENV=production
+      - CORS_ORIGIN=*
+      - DATABASE_URL=${DATABASE_URL:-postgres://postgres:casepassword2026@postgres:5432/case_db}
+    healthcheck:
+      test: ["CMD-SHELL", "node -e \"fetch('http://localhost:3001/api/health').then(r => process.exit(r.ok ? 0 : 1)).catch(() => process.exit(1))\""]
+      interval: 20s
+      timeout: 5s
+      retries: 3
+      start_period: 5s
+    networks:
+      - case_network
+
+  # 3. Servicio de Frontend (React 19 + Nginx de Alta Eficiencia)
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+    container_name: case_enterprise_frontend
+    restart: unless-stopped
+    ports:
+      - "80:80"
+    depends_on:
+      backend:
+        condition: service_healthy
+    networks:
+      - case_network
+
+volumes:
+  postgres_data:
+    driver: local
+
+networks:
+  case_network:
+    driver: bridge

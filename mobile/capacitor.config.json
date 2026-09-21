@@ -1,0 +1,15 @@
+{
+  "appId": "com.casestudio.voicefiller",
+  "appName": "CASE Voice AI - Relleno Offline/Online",
+  "webDir": "dist",
+  "bundledWebRuntime": false,
+  "plugins": {
+    "SplashScreen": {
+      "launchShowDuration": 1500,
+      "backgroundColor": "#0f172a"
+    }
+  },
+  "server": {
+    "cleartext": true
+  }
+}

@@ -1,0 +1,17 @@
+{
+  "name": "case-enterprise-backend",
+  "version": "1.0.0",
+  "description": "Servidor y API Modular para CASE Enterprise Studio (PUDS)",
+  "main": "src/index.js",
+  "type": "module",
+  "scripts": {
+    "start": "node src/index.js",
+    "dev": "node --watch src/index.js"
+  },
+  "dependencies": {
+    "cors": "^2.8.6",
+    "express": "^5.2.1",
+    "pg": "^8.23.0",
+    "socket.io": "^4.8.3"
+  }
+}
