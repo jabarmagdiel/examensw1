@@ -58,6 +58,76 @@ function cleanIdentifier(str: string): string {
     .replace(/^_+|_+$/g, '');
 }
 
+export interface VoiceCommandGuideItem {
+  action: string;
+  syntax: string;
+  parameters: string;
+  example: string;
+}
+
+export const VOICE_COMMANDS_GUIDE: VoiceCommandGuideItem[] = [
+  {
+    action: 'Crear Tabla',
+    syntax: 'Crear tabla <Nombre>',
+    parameters: '<Nombre>: Nombre de la clase (ej: Proveedor, Factura)',
+    example: 'Crear tabla Proveedor'
+  },
+  {
+    action: 'Crear con Campos',
+    syntax: 'Crear tabla <Nombre> con <Campo1> y <Campo2>',
+    parameters: '<Nombre>, lista de campos separados por "y" o coma',
+    example: 'Crear tabla Factura con total y fecha'
+  },
+  {
+    action: 'Añadir Atributo',
+    syntax: 'Añadir atributo <Campo> a <Tabla>',
+    parameters: '<Campo>: nombre del atributo, <Tabla>: entidad destino',
+    example: 'Añadir atributo telefono a Proveedor'
+  },
+  {
+    action: 'Añadir con Tipo',
+    syntax: 'Añadir <Campo> de tipo <Tipo> a <Tabla>',
+    parameters: '<Tipo>: texto, entero, decimal, fecha, booleano',
+    example: 'Añadir precio de tipo decimal a Producto'
+  },
+  {
+    action: 'Editar Atributo',
+    syntax: 'Editar atributo <Actual> a <Nuevo> en <Tabla>',
+    parameters: '<Actual>: nombre actual, <Nuevo>: nuevo nombre, <Tabla>: entidad',
+    example: 'Editar atributo telefono a celular en Proveedor'
+  },
+  {
+    action: 'Cambiar Tipo',
+    syntax: 'Cambiar tipo de <Campo> a <NuevoTipo> en <Tabla>',
+    parameters: '<Campo>: atributo, <NuevoTipo>: tipo dato, <Tabla>: entidad',
+    example: 'Cambiar tipo de precio a decimal en Producto'
+  },
+  {
+    action: 'Eliminar Atributo',
+    syntax: 'Eliminar atributo <Campo> en <Tabla>',
+    parameters: '<Campo>: nombre a borrar, <Tabla>: entidad',
+    example: 'Eliminar atributo direccion en Proveedor'
+  },
+  {
+    action: 'Relacionar Tablas',
+    syntax: 'Relacionar <Origen> con <Destino> [de 1 a muchos]',
+    parameters: '<Origen>: tabla 1, <Destino>: tabla 2, cardinalidad opcional',
+    example: 'Relacionar Proveedor con Producto de uno a muchos'
+  },
+  {
+    action: 'Clave Primaria (PK)',
+    syntax: 'Hacer <Campo> clave primaria en <Tabla>',
+    parameters: '<Campo>: atributo que será PK, <Tabla>: entidad',
+    example: 'Hacer codigo clave primaria en Proveedor'
+  },
+  {
+    action: 'Eliminar Tabla',
+    syntax: 'Eliminar tabla <Nombre>',
+    parameters: '<Nombre>: nombre de la entidad a remover',
+    example: 'Eliminar tabla Factura'
+  }
+];
+
 /**
  * MOTOR DE GRAFICADO POR VOZ EN TIEMPO REAL:
  * Interpreta instrucciones granulares para manipular directamente el diagrama sobre el canvas.
@@ -76,7 +146,97 @@ export function executeVoiceCommand(
   const relationships = [...model.relationships];
   const functionalDependencies = [...model.functionalDependencies];
 
-  // 1. COMANDO: Añadir atributo a entidad
+  // 1. COMANDO: Editar o Renombrar Atributo
+  // Ej: "editar atributo telefono a celular en Proveedor", "cambiar atributo nombre a razon_social en Proveedor"
+  const editAttrMatch = cleanText.match(/(?:editar|cambiar|modificar|renombrar)\s+(?:el\s+)?(?:atributo|campo|columna)?\s*([a-zA-Z0-9_]+)\s+(?:a|por)\s+([a-zA-Z0-9_]+)\s+(?:en|de|para)\s+(?:la\s+)?(?:entidad\s+|clase\s+|tabla\s+)?([a-zA-Z0-9_]+)/i);
+  if (editAttrMatch) {
+    const oldAttrName = cleanIdentifier(editAttrMatch[1]).toLowerCase();
+    const newAttrName = cleanIdentifier(editAttrMatch[2]).toLowerCase();
+    const entityName = editAttrMatch[3].toLowerCase();
+
+    const targetEntity = entities.find(e => stripAccents(e.name).toLowerCase() === entityName);
+    if (!targetEntity) {
+      return {
+        model,
+        summary: `No se encontró la tabla "${editAttrMatch[3]}" para editar el atributo.`,
+        actionType: 'UNKNOWN'
+      };
+    }
+
+    const attr = targetEntity.attributes.find(a => cleanIdentifier(a.name).toLowerCase() === oldAttrName);
+    if (!attr) {
+      return {
+        model,
+        summary: `No se encontró el atributo "${oldAttrName}" en la tabla ${targetEntity.name}.`,
+        actionType: 'UNKNOWN'
+      };
+    }
+
+    attr.name = newAttrName;
+    return {
+      model: { ...model, entities, updatedAt: Date.now() },
+      summary: `Atributo "${oldAttrName}" renombrado exitosamente a "${newAttrName}" en ${targetEntity.name}.`,
+      actionType: 'ADD_ATTRIBUTE'
+    };
+  }
+
+  // 2. COMANDO: Cambiar Tipo de Atributo
+  // Ej: "cambiar tipo de precio a decimal en Producto", "cambiar tipo de telefono a varchar en Proveedor"
+  const changeTypeMatch = cleanText.match(/cambiar\s+tipo\s+(?:de\s+)?(?:el\s+)?(?:atributo|campo)?\s*([a-zA-Z0-9_]+)\s+a\s+([a-zA-Z0-9_]+)\s+(?:en|de|para)\s+(?:la\s+)?(?:entidad\s+|clase\s+|tabla\s+)?([a-zA-Z0-9_]+)/i);
+  if (changeTypeMatch) {
+    const attrName = cleanIdentifier(changeTypeMatch[1]).toLowerCase();
+    const newTypeStr = changeTypeMatch[2].toLowerCase();
+    const entityName = changeTypeMatch[3].toLowerCase();
+
+    const targetEntity = entities.find(e => stripAccents(e.name).toLowerCase() === entityName);
+    if (targetEntity) {
+      const attr = targetEntity.attributes.find(a => cleanIdentifier(a.name).toLowerCase() === attrName);
+      if (attr) {
+        attr.type = parseDataType(newTypeStr);
+        return {
+          model: { ...model, entities, updatedAt: Date.now() },
+          summary: `Tipo del atributo "${attr.name}" actualizado a ${attr.type} en ${targetEntity.name}.`,
+          actionType: 'ADD_ATTRIBUTE'
+        };
+      }
+    }
+  }
+
+  // 3. COMANDO: Eliminar Atributo
+  // Ej: "eliminar atributo telefono en Proveedor", "borrar campo direccion de Cliente"
+  const delAttrMatch = cleanText.match(/(?:eliminar|borrar|quitar)\s+(?:el\s+)?(?:atributo|campo|columna)\s+([a-zA-Z0-9_]+)\s+(?:de|en|para)\s+(?:la\s+)?(?:entidad\s+|clase\s+|tabla\s+)?([a-zA-Z0-9_]+)/i);
+  if (delAttrMatch) {
+    const attrName = cleanIdentifier(delAttrMatch[1]).toLowerCase();
+    const entityName = delAttrMatch[2].toLowerCase();
+
+    const targetEntity = entities.find(e => stripAccents(e.name).toLowerCase() === entityName);
+    if (!targetEntity) {
+      return {
+        model,
+        summary: `No se encontró la tabla "${delAttrMatch[2]}" para eliminar el atributo.`,
+        actionType: 'UNKNOWN'
+      };
+    }
+
+    const initialCount = targetEntity.attributes.length;
+    targetEntity.attributes = targetEntity.attributes.filter(a => cleanIdentifier(a.name).toLowerCase() !== attrName);
+
+    if (targetEntity.attributes.length === initialCount) {
+      return {
+        model,
+        summary: `No se encontró el atributo "${attrName}" en ${targetEntity.name}.`,
+        actionType: 'UNKNOWN'
+      };
+    }
+
+    return {
+      model: { ...model, entities, updatedAt: Date.now() },
+      summary: `Atributo "${attrName}" eliminado de ${targetEntity.name}.`,
+      actionType: 'ADD_ATTRIBUTE'
+    };
+  }
+
+  // 4. COMANDO: Añadir Atributo a Entidad
   // Acepta: "añadir atributo teléfono a proveedor", "agregar campo precio de tipo decimal a Producto", "poner telefono en Cliente", "añadir telefono a proveedor"
   const addAttrMatch = cleanText.match(/(?:agrega(?:r)?|anad(?:ir|e)|crea(?:r)?|inserta(?:r)?|pon(?:er)?)\s+(?:el\s+)?(?:atributo|campo|propiedad|columna)?\s*([a-zA-Z0-9_]+)(?:\s+de\s+tipo\s+([a-zA-Z0-9_]+))?\s+(?:a|en|para)\s+(?:la\s+)?(?:entidad\s+|clase\s+|tabla\s+)?([a-zA-Z0-9_]+)/i);
 
@@ -146,8 +306,9 @@ export function executeVoiceCommand(
     };
   }
 
-  // 2. COMANDO: Establecer clave primaria (PK)
-  const pkMatch = cleanText.match(/(?:hacer\s+que|poner|marcar)\s+([a-zA-Z0-9_]+)\s+como\s+(?:clave|llave)\s+primaria\s+en\s+(?:la\s+)?(?:entidad\s+|clase\s+|tabla\s+)?([a-zA-Z0-9_]+)/i);
+  // 5. COMANDO: Establecer Clave Primaria (PK)
+  const pkMatch = cleanText.match(/(?:hacer\s+que|poner|marcar)\s+([a-zA-Z0-9_]+)\s+como\s+(?:clave|llave)\s+primaria\s+en\s+(?:la\s+)?(?:entidad\s+|clase\s+|tabla\s+)?([a-zA-Z0-9_]+)/i) ||
+                  cleanText.match(/hacer\s+([a-zA-Z0-9_]+)\s+(?:clave|llave)\s+primaria\s+en\s+(?:la\s+)?(?:entidad\s+|clase\s+|tabla\s+)?([a-zA-Z0-9_]+)/i);
   if (pkMatch) {
     const attrName = cleanIdentifier(pkMatch[1]).toLowerCase();
     const entityName = pkMatch[2].toLowerCase();
@@ -167,7 +328,7 @@ export function executeVoiceCommand(
     }
   }
 
-  // 3. COMANDO: Crear relación entre dos entidades
+  // 6. COMANDO: Crear Relación entre Dos Entidades
   const relMatch = cleanText.match(/(?:crear?\s+relacion|relacionar|conectar)(?:\s+de\s+(uno\s+a\s+uno|uno\s+a\s+muchos|muchos\s+a\s+muchos))?\s+(?:entre\s+)?(?:la\s+)?(?:entidad\s+|clase\s+|tabla\s+)?([a-zA-Z0-9_]+)\s+(?:y|con)\s+(?:la\s+)?(?:entidad\s+|clase\s+|tabla\s+)?([a-zA-Z0-9_]+)/i);
   if (relMatch) {
     const cardStr = (relMatch[1] || '').toLowerCase();
@@ -200,10 +361,10 @@ export function executeVoiceCommand(
     }
   }
 
-  // 4. COMANDO: Eliminar entidad
-  const delMatch = cleanText.match(/(?:eliminar|borrar|quitar)\s+(?:la\s+)?(?:entidad|clase|tabla)\s+([a-zA-Z0-9_]+)/i);
-  if (delMatch) {
-    const entName = delMatch[1].toLowerCase();
+  // 7. COMANDO: Eliminar Entidad / Tabla
+  const delEntityMatch = cleanText.match(/(?:eliminar|borrar|quitar)\s+(?:la\s+)?(?:entidad|clase|tabla)\s+([a-zA-Z0-9_]+)/i);
+  if (delEntityMatch) {
+    const entName = delEntityMatch[1].toLowerCase();
     const target = entities.find(e => stripAccents(e.name).toLowerCase() === entName);
     if (target) {
       const filteredEntities = entities.filter(e => e.id !== target.id);
@@ -216,7 +377,7 @@ export function executeVoiceCommand(
     }
   }
 
-  // 5. COMANDO: Crear nueva entidad / clase
+  // 8. COMANDO: Crear Nueva Entidad / Clase
   const addEntityMatch = cleanText.match(/(?:crear?|agrega(?:r)?|anad(?:ir|e)|inserta(?:r)?)\s+(?:la\s+)?(?:entidad|clase|tabla)\s+([a-zA-Z0-9_]+)(?:\s+(?:con\s+atributos?|con\s+campos?|con)\s+(.+))?/i);
   if (addEntityMatch) {
     const rawName = addEntityMatch[1];
@@ -275,37 +436,37 @@ export function executeVoiceCommand(
     }
   }
 
-  // 6. COMANDO: Modelar dominio completo (Veterinaria, Farmacia, Biblioteca, E-commerce)
-  if (cleanText.includes('veterinaria') || cleanText.includes('mascota') || cleanText.includes('animal')) {
-    const res = createVeterinariaDomain();
-    return {
-      model: { ...model, entities: res.entities, relationships: res.relationships, functionalDependencies: res.functionalDependencies, updatedAt: Date.now() },
-      summary: res.summary,
-      actionType: 'GENERATE_DOMAIN'
-    };
-  }
-
-  if (cleanText.includes('farmacia') || cleanText.includes('medicamento') || cleanText.includes('receta')) {
-    const res = createFarmaciaDomain();
-    return {
-      model: { ...model, entities: res.entities, relationships: res.relationships, functionalDependencies: res.functionalDependencies, updatedAt: Date.now() },
-      summary: res.summary,
-      actionType: 'GENERATE_DOMAIN'
-    };
-  }
-
-  if (cleanText.includes('tienda') || cleanText.includes('e-commerce') || cleanText.includes('comercio') || cleanText.includes('ventas')) {
-    const res = createEcommerceDomain();
-    return {
-      model: { ...model, entities: res.entities, relationships: res.relationships, functionalDependencies: res.functionalDependencies, updatedAt: Date.now() },
-      summary: res.summary,
-      actionType: 'GENERATE_DOMAIN'
-    };
+  // 9. COMANDO: Plantillas completas (Solo si se pide EXPLÍCITAMENTE la plantilla completa)
+  if (cleanText.includes('generar plantilla') || cleanText.includes('cargar plantilla') || cleanText.includes('cargar ejemplo completo')) {
+    if (cleanText.includes('veterinaria')) {
+      const res = createVeterinariaDomain();
+      return {
+        model: { ...model, entities: res.entities, relationships: res.relationships, functionalDependencies: res.functionalDependencies, updatedAt: Date.now() },
+        summary: res.summary,
+        actionType: 'GENERATE_DOMAIN'
+      };
+    }
+    if (cleanText.includes('farmacia')) {
+      const res = createFarmaciaDomain();
+      return {
+        model: { ...model, entities: res.entities, relationships: res.relationships, functionalDependencies: res.functionalDependencies, updatedAt: Date.now() },
+        summary: res.summary,
+        actionType: 'GENERATE_DOMAIN'
+      };
+    }
+    if (cleanText.includes('tienda') || cleanText.includes('e-commerce') || cleanText.includes('comercio')) {
+      const res = createEcommerceDomain();
+      return {
+        model: { ...model, entities: res.entities, relationships: res.relationships, functionalDependencies: res.functionalDependencies, updatedAt: Date.now() },
+        summary: res.summary,
+        actionType: 'GENERATE_DOMAIN'
+      };
+    }
   }
 
   return {
     model,
-    summary: `No entendí el comando "${transcript}". Intenta decir: "Crear clase Proveedor", "Añadir atributo telefono a Cliente", o "Relacionar Mascota con Cliente".`,
+    summary: `No entendí el comando "${transcript}". Di por ejemplo: "Crear tabla Proveedor", "Añadir atributo telefono a Proveedor", o "Editar atributo telefono a celular en Proveedor".`,
     actionType: 'UNKNOWN'
   };
 }

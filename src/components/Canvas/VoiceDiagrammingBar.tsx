@@ -9,10 +9,12 @@ import {
   X, 
   ArrowUpDown, 
   Minimize2,
-  ChevronDown
+  ChevronDown,
+  BookOpen,
+  Play
 } from 'lucide-react';
 import { DiagramModel } from '../../types/case';
-import { executeVoiceCommand } from '../../services/aiAssistant';
+import { executeVoiceCommand, VOICE_COMMANDS_GUIDE } from '../../services/aiAssistant';
 
 interface VoiceDiagrammingBarProps {
   model: DiagramModel;
@@ -345,10 +347,12 @@ export const VoiceDiagrammingBar: React.FC<VoiceDiagrammingBarProps> = ({
             Ejemplos:
           </span>
           {[
-            'crear entidad Proveedor con nit y direccion',
-            'añadir atributo telefono a Cliente',
-            'añadir atributo precio de tipo decimal a Mascota',
-            'relacionar Cliente con Mascota de uno a muchos'
+            'Crear tabla Proveedor',
+            'Añadir atributo telefono a Proveedor',
+            'Editar atributo telefono a celular en Proveedor',
+            'Añadir precio de tipo decimal a Producto',
+            'Relacionar Proveedor con Producto',
+            'Hacer id clave primaria en Proveedor'
           ].map(example => (
             <button
               key={example}
@@ -360,9 +364,9 @@ export const VoiceDiagrammingBar: React.FC<VoiceDiagrammingBarProps> = ({
                 fontSize: 10,
                 padding: '2px 8px',
                 borderRadius: 10,
-                background: 'rgba(255, 255, 255, 0.05)',
-                color: 'var(--text-secondary)',
-                border: '1px solid var(--border-subtle)',
+                background: 'rgba(99, 102, 241, 0.1)',
+                color: '#93c5fd',
+                border: '1px solid rgba(147, 197, 253, 0.25)',
                 whiteSpace: 'nowrap',
                 cursor: 'pointer'
               }}
@@ -372,25 +376,82 @@ export const VoiceDiagrammingBar: React.FC<VoiceDiagrammingBarProps> = ({
           ))}
         </div>
 
-        {/* Guía desplegable de ayuda */}
+        {/* Guía desplegable de ayuda con parámetros exactos */}
         {showHelp && (
           <div style={{
-            marginTop: 8,
-            padding: 10,
-            background: 'rgba(15, 23, 42, 0.95)',
-            borderRadius: 8,
-            border: '1px solid var(--border-subtle)',
-            fontSize: 11,
-            lineHeight: 1.6,
-            color: 'var(--text-secondary)'
+            marginTop: 10,
+            padding: 12,
+            background: 'rgba(10, 15, 30, 0.98)',
+            borderRadius: 10,
+            border: '1px solid rgba(99, 102, 241, 0.35)',
+            maxHeight: 260,
+            overflowY: 'auto',
+            display: 'flex',
+            flexDirection: 'column',
+            gap: 6
           }}>
-            <div style={{ fontWeight: 600, color: '#fff', marginBottom: 4 }}>
-              🎙️ Sintaxis de Comandos de Voz:
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 2 }}>
+              <div style={{ fontWeight: 700, color: '#e0e7ff', fontSize: 11, display: 'flex', alignItems: 'center', gap: 6 }}>
+                <BookOpen size={13} color="#818cf8" />
+                <span>Parámetros de Comandos de Voz:</span>
+              </div>
+              <button
+                onClick={() => setShowHelp(false)}
+                style={{ background: 'transparent', border: 'none', color: '#94a3b8', cursor: 'pointer', fontSize: 11 }}
+              >
+                ✕ Cerrar
+              </button>
             </div>
-            <div>• <strong>Crear clase/entidad:</strong> &ldquo;Crear entidad Proveedor&rdquo; o &ldquo;Crear clase Factura con total y fecha&rdquo;</div>
-            <div>• <strong>Añadir atributo con tipo:</strong> &ldquo;Añadir atributo telefono a Cliente&rdquo; o &ldquo;Añadir campo precio decimal a Producto&rdquo;</div>
-            <div>• <strong>Graficar relación:</strong> &ldquo;Crear relación de uno a muchos entre Cliente y Mascota&rdquo;</div>
-            <div>• <strong>Eliminar elemento:</strong> &ldquo;Eliminar entidad HistorialClinico&rdquo;</div>
+            <div style={{ fontSize: 10, color: '#94a3b8', marginBottom: 4 }}>
+              Cada comando actúa únicamente sobre los elementos especificados sin sobrescribir otras tablas:
+            </div>
+            {VOICE_COMMANDS_GUIDE.map((item, idx) => (
+              <div
+                key={idx}
+                style={{
+                  background: 'rgba(255, 255, 255, 0.03)',
+                  border: '1px solid rgba(255, 255, 255, 0.06)',
+                  borderRadius: 8,
+                  padding: '6px 8px',
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'space-between',
+                  gap: 8
+                }}
+              >
+                <div style={{ flex: 1 }}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                    <span style={{ fontSize: 10, fontWeight: 700, color: '#38bdf8' }}>{item.action}:</span>
+                    <span style={{ fontSize: 10, fontFamily: 'monospace', color: '#f1f5f9' }}>{item.syntax}</span>
+                  </div>
+                  <div style={{ fontSize: 9, color: '#64748b', marginTop: 1 }}>
+                    ⚙️ <em>{item.parameters}</em>
+                  </div>
+                </div>
+                <button
+                  onClick={() => {
+                    setTranscript(item.example);
+                    handleExecute(item.example);
+                  }}
+                  style={{
+                    fontSize: 9,
+                    background: 'rgba(99, 102, 241, 0.2)',
+                    color: '#a5b4fc',
+                    border: '1px solid rgba(99, 102, 241, 0.4)',
+                    borderRadius: 8,
+                    padding: '2px 6px',
+                    cursor: 'pointer',
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: 3,
+                    flexShrink: 0
+                  }}
+                  title="Ejecutar ejemplo"
+                >
+                  <Play size={8} /> Probar
+                </button>
+              </div>
+            ))}
           </div>
         )}
       </div>
