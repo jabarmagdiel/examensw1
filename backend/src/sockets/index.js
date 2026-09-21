@@ -1,5 +1,6 @@
 import { registerPresenceHandlers } from './presence.socket.js';
 import { registerModelHandlers } from './model.socket.js';
+import { registerWorkspaceHandlers } from './workspace.socket.js';
 import { roomService } from '../services/room.service.js';
 
 /**
@@ -10,6 +11,7 @@ export function initSocketHandlers(io) {
     console.log(`[Socket] Conexión establecida: ${socket.id}`);
 
     // Registrar handlers modulares
+    registerWorkspaceHandlers(io, socket);
     registerPresenceHandlers(io, socket);
     registerModelHandlers(io, socket);
 

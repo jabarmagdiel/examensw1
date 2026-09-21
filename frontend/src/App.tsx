@@ -265,6 +265,22 @@ export default function App() {
   // Proyecto activo actual
   const currentModel = projects.find(p => p.id === activeProjectId) || projects[0] || INITIAL_PROJECTS[0];
 
+  // Cargar estado inicial del Workspace compartido desde la API
+  useEffect(() => {
+    const API_BASE = (typeof window !== 'undefined' && window.location.hostname === 'localhost' && window.location.port !== '3001') ? 'http://localhost:3001' : '';
+    fetch(`${API_BASE}/api/workspace`)
+      .then(r => r.json())
+      .then(data => {
+        if (data.folders && data.folders.length > 0) {
+          setFolders(data.folders);
+        }
+        if (data.projects && data.projects.length > 0) {
+          setProjects(data.projects);
+        }
+      })
+      .catch(() => {});
+  }, []);
+
   // Socket.io Connection
   const socketRef = useRef<Socket | null>(null);
 
@@ -274,14 +290,57 @@ export default function App() {
         (window.location.hostname === 'localhost' && window.location.port !== '3001' ? 'http://localhost:3001' : '/');
       const socket = io(socketUrl, {
         transports: ['websocket', 'polling'],
-        reconnectionAttempts: 3
+        reconnectionAttempts: 5
       });
 
       socketRef.current = socket;
 
       socket.on('connect', () => {
+        socket.emit('workspace_get');
         if (currentModel) {
           socket.emit('join_project', { roomId: currentModel.id, user: currentUser });
+        }
+      });
+
+      // Sincronización completa de carpetas y proyectos
+      socket.on('workspace_sync', ({ folders: remoteFolders, projects: remoteProjects }: any) => {
+        if (remoteFolders && remoteFolders.length > 0) {
+          setFolders(remoteFolders);
+        }
+        if (remoteProjects && remoteProjects.length > 0) {
+          setProjects(remoteProjects);
+        }
+      });
+
+      // Eventos de Carpetas en tiempo real entre colaboradores
+      socket.on('folder_created', (newFolder: ProjectFolder) => {
+        if (newFolder) {
+          setFolders(prev => prev.some(f => f.id === newFolder.id) ? prev : [...prev, newFolder]);
+        }
+      });
+
+      socket.on('folder_deleted', (folderId: string) => {
+        if (folderId) {
+          setFolders(prev => prev.filter(f => f.id !== folderId));
+        }
+      });
+
+      // Eventos de Proyectos en tiempo real entre colaboradores
+      socket.on('project_created', (newProj: DiagramModel) => {
+        if (newProj) {
+          setProjects(prev => prev.some(p => p.id === newProj.id) ? prev : [...prev, newProj]);
+        }
+      });
+
+      socket.on('project_updated', (updatedProj: DiagramModel) => {
+        if (updatedProj) {
+          setProjects(prev => prev.map(p => p.id === updatedProj.id ? updatedProj : p));
+        }
+      });
+
+      socket.on('project_deleted', (deletedId: string) => {
+        if (deletedId) {
+          setProjects(prev => prev.filter(p => p.id !== deletedId));
         }
       });
 
@@ -307,7 +366,14 @@ export default function App() {
     } catch (e) {
       console.warn('Servidor Socket no disponible, operando en modo local reactivo.');
     }
-  }, [activeProjectId]);
+  }, []);
+
+  // Actualizar sala activa del socket al cambiar de proyecto
+  useEffect(() => {
+    if (socketRef.current?.connected && currentModel) {
+      socketRef.current.emit('join_project', { roomId: currentModel.id, user: currentUser });
+    }
+  }, [activeProjectId, currentUser]);
 
   // Actualizar el modelo activo en la lista de proyectos y emitir por websocket
   const broadcastModelChange = (updatedModel: DiagramModel, changeType: string) => {
@@ -319,6 +385,7 @@ export default function App() {
         changeType,
         sourceUserId: currentUser.id
       });
+      socketRef.current.emit('project_update', updatedModel);
     }
   };
 
@@ -343,7 +410,7 @@ export default function App() {
       simulationIntervalRef.current = setInterval(() => {
         setCollaborators(prev => prev.map(user => {
           if (user.id === currentUser.id) return user;
-          const currentX = user.cursor?.x || 300;
+          const currentX = user.cursor?.x || 200;
           const currentY = user.cursor?.y || 200;
           const deltaX = (Math.random() - 0.5) * 60;
           const deltaY = (Math.random() - 0.5) * 40;
@@ -360,7 +427,7 @@ export default function App() {
     }
   };
 
-  // Manejo de Proyectos y Carpetas
+  // Manejo de Proyectos y Carpetas con difusión en vivo
   const handleCreateFolder = (name: string, color: string = '#3b82f6') => {
     const newFolder: ProjectFolder = {
       id: `f_${Date.now()}`,
@@ -369,6 +436,9 @@ export default function App() {
       createdAt: Date.now()
     };
     setFolders(prev => [...prev, newFolder]);
+    if (socketRef.current?.connected) {
+      socketRef.current.emit('folder_create', newFolder);
+    }
   };
 
   const handleCreateProject = (
@@ -402,6 +472,9 @@ export default function App() {
     setProjects(prev => [...prev, newProject]);
     setActiveProjectId(newProject.id);
     setActiveModule('canvas');
+    if (socketRef.current?.connected) {
+      socketRef.current.emit('project_create', newProject);
+    }
   };
 
   const handleDeleteProject = (projectId: string) => {
@@ -410,11 +483,17 @@ export default function App() {
       const remaining = projects.filter(p => p.id !== projectId);
       if (remaining.length > 0) setActiveProjectId(remaining[0].id);
     }
+    if (socketRef.current?.connected) {
+      socketRef.current.emit('project_delete', projectId);
+    }
   };
 
   const handleDeleteFolder = (folderId: string) => {
     setFolders(prev => prev.filter(f => f.id !== folderId));
     setProjects(prev => prev.map(p => p.folderId === folderId ? { ...p, folderId: 'f_1' } : p));
+    if (socketRef.current?.connected) {
+      socketRef.current.emit('folder_delete', folderId);
+    }
   };
 
   // Modificador de entidad por arrastre
