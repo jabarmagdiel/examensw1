@@ -119,6 +119,10 @@ export function exportToEnterpriseArchitectXMI(diagram: DiagramModel): string {
   // Esto es lo que permite que EA dibuje el diagrama automáticamente con posiciones en el lienzo
   xml += `  <xmi:Extension extender="Enterprise Architect" extenderID="6.5">
     <elements>
+      <element xmi:idref="${pkgId}" xmi:type="uml:Package" name="${diagram.name || 'Modelo_PUDS'}" scope="public">
+        <model package2="EA_Model" ea_eleType="package"/>
+        <properties isSpecification="false" sType="Package" nType="0" scope="public"/>
+      </element>
 `;
 
   diagram.entities.forEach((entity, idx) => {
