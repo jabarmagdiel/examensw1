@@ -202,36 +202,81 @@ export function executeVoiceCommand(
     }
   }
 
-  // 3. COMANDO: Eliminar Atributo
-  // Ej: "eliminar atributo telefono en Proveedor", "borrar campo direccion de Cliente"
-  const delAttrMatch = cleanText.match(/(?:eliminar|borrar|quitar)\s+(?:el\s+)?(?:atributo|campo|columna)\s+([a-zA-Z0-9_]+)\s+(?:de|en|para)\s+(?:la\s+)?(?:entidad\s+|clase\s+|tabla\s+)?([a-zA-Z0-9_]+)/i);
-  if (delAttrMatch) {
-    const attrName = cleanIdentifier(delAttrMatch[1]).toLowerCase();
-    const entityName = delAttrMatch[2].toLowerCase();
+/**
+ * Busca una entidad por nombre tolerando mayúsculas, acentos, plurales o tableName.
+ */
+function findEntityFlexible(searchName: string, entities: Entity[]): Entity | undefined {
+  const norm = stripAccents(searchName).trim().toLowerCase();
+  // 1. Coincidencia exacta de nombre o tableName
+  let found = entities.find(e => stripAccents(e.name).toLowerCase() === norm || (e.tableName && stripAccents(e.tableName).toLowerCase() === norm));
+  if (found) return found;
 
-    const targetEntity = entities.find(e => stripAccents(e.name).toLowerCase() === entityName);
+  // 2. Variaciones singular / plural ('s', 'es')
+  const singular = norm.endsWith('es') ? norm.slice(0, -2) : norm.endsWith('s') ? norm.slice(0, -1) : norm;
+  found = entities.find(e => {
+    const eNorm = stripAccents(e.name).toLowerCase();
+    const eSingular = eNorm.endsWith('es') ? eNorm.slice(0, -2) : eNorm.endsWith('s') ? eNorm.slice(0, -1) : eNorm;
+    return eNorm === singular || eSingular === singular || eSingular === norm || eNorm === norm + 's' || eNorm === norm + 'es';
+  });
+  return found;
+}
+
+/**
+ * Busca un atributo dentro de una entidad tolerando mayúsculas, acentos y plurales.
+ */
+function findAttributeFlexible(searchName: string, attributes: Attribute[]): Attribute | undefined {
+  const norm = cleanIdentifier(stripAccents(searchName)).toLowerCase();
+  let found = attributes.find(a => cleanIdentifier(stripAccents(a.name)).toLowerCase() === norm);
+  if (found) return found;
+
+  const singular = norm.endsWith('es') ? norm.slice(0, -2) : norm.endsWith('s') ? norm.slice(0, -1) : norm;
+  return attributes.find(a => {
+    const aNorm = cleanIdentifier(stripAccents(a.name)).toLowerCase();
+    const aSingular = aNorm.endsWith('es') ? aNorm.slice(0, -2) : aNorm.endsWith('s') ? aNorm.slice(0, -1) : aNorm;
+    return aNorm === singular || aSingular === singular || aSingular === norm || aNorm === norm + 's' || aNorm === norm + 'es';
+  });
+}
+
+  // 3. COMANDO: Eliminar Atributo
+  // Acepta: "eliminar atributo telefono en Proveedor", "borrar campo direccion de Cliente",
+  // "eliminar de la tabla Proveedor el atributo telefono", "eliminar telefono de Proveedor", "borrar email en Cliente"
+  const delAttrInvMatch = cleanText.match(/(?:eliminar|borrar|quitar|remover)\s+(?:de|en|para)\s+(?:la\s+|el\s+)?(?:entidad\s+|clase\s+|tabla\s+)?(?:de\s+)?([a-zA-Z0-9_]+)\s+(?:el\s+|la\s+)?(?:atributo|campo|columna)?\s*([a-zA-Z0-9_]+)/i);
+  const delAttrStdMatch = cleanText.match(/(?:eliminar|borrar|quitar|remover)\s+(?:el\s+|la\s+)?(?:atributo|campo|columna)?\s*([a-zA-Z0-9_]+)\s+(?:de|en|para)\s+(?:la\s+|el\s+)?(?:entidad\s+|clase\s+|tabla\s+)?(?:de\s+)?([a-zA-Z0-9_]+)/i);
+
+  let rawDelAttr: string | null = null;
+  let rawDelEntity: string | null = null;
+
+  if (delAttrInvMatch && !['tabla', 'entidad', 'clase'].includes(delAttrInvMatch[2])) {
+    rawDelEntity = delAttrInvMatch[1];
+    rawDelAttr = delAttrInvMatch[2];
+  } else if (delAttrStdMatch && !['tabla', 'entidad', 'clase'].includes(delAttrStdMatch[1])) {
+    rawDelAttr = delAttrStdMatch[1];
+    rawDelEntity = delAttrStdMatch[2];
+  }
+
+  if (rawDelAttr && rawDelEntity) {
+    const targetEntity = findEntityFlexible(rawDelEntity, entities);
     if (!targetEntity) {
       return {
         model,
-        summary: `No se encontró la tabla "${delAttrMatch[2]}" para eliminar el atributo.`,
+        summary: `No se encontró la tabla "${rawDelEntity}" para eliminar el atributo "${rawDelAttr}".`,
         actionType: 'UNKNOWN'
       };
     }
 
-    const initialCount = targetEntity.attributes.length;
-    targetEntity.attributes = targetEntity.attributes.filter(a => cleanIdentifier(a.name).toLowerCase() !== attrName);
-
-    if (targetEntity.attributes.length === initialCount) {
+    const targetAttr = findAttributeFlexible(rawDelAttr, targetEntity.attributes);
+    if (!targetAttr) {
       return {
         model,
-        summary: `No se encontró el atributo "${attrName}" en ${targetEntity.name}.`,
+        summary: `No se encontró el atributo "${rawDelAttr}" en la tabla ${targetEntity.name}.`,
         actionType: 'UNKNOWN'
       };
     }
 
+    targetEntity.attributes = targetEntity.attributes.filter(a => a.id !== targetAttr.id);
     return {
       model: { ...model, entities, updatedAt: Date.now() },
-      summary: `Atributo "${attrName}" eliminado de ${targetEntity.name}.`,
+      summary: `Atributo "${targetAttr.name}" eliminado exitosamente de la tabla ${targetEntity.name}.`,
       actionType: 'ADD_ATTRIBUTE'
     };
   }
@@ -362,16 +407,39 @@ export function executeVoiceCommand(
   }
 
   // 7. COMANDO: Eliminar Entidad / Tabla
-  const delEntityMatch = cleanText.match(/(?:eliminar|borrar|quitar)\s+(?:la\s+)?(?:entidad|clase|tabla)\s+([a-zA-Z0-9_]+)/i);
-  if (delEntityMatch) {
-    const entName = delEntityMatch[1].toLowerCase();
-    const target = entities.find(e => stripAccents(e.name).toLowerCase() === entName);
-    if (target) {
+  // Acepta: "eliminar tabla Proveedor", "borrar la tabla de proveedores", "quitar entidad Cliente", "eliminar clase Factura", "borrar Proveedor"
+  const delEntityExplicitMatch = cleanText.match(/(?:eliminar|borrar|quitar|remover)\s+(?:la\s+|el\s+)?(?:entidad|clase|tabla)\s+(?:de\s+)?([a-zA-Z0-9_]+)/i);
+  const delEntityDirectMatch = cleanText.match(/(?:eliminar|borrar|quitar|remover)\s+(?:la\s+|el\s+)?([a-zA-Z0-9_]+)/i);
+
+  let rawTargetEntName: string | null = null;
+  let isExplicitTableDelete = false;
+
+  if (delEntityExplicitMatch) {
+    rawTargetEntName = delEntityExplicitMatch[1];
+    isExplicitTableDelete = true;
+  } else if (delEntityDirectMatch) {
+    const cand = delEntityDirectMatch[1];
+    if (findEntityFlexible(cand, entities)) {
+      rawTargetEntName = cand;
+    }
+  }
+
+  if (rawTargetEntName) {
+    const target = findEntityFlexible(rawTargetEntName, entities);
+    if (!target) {
+      if (isExplicitTableDelete) {
+        return {
+          model,
+          summary: `No se encontró la tabla "${rawTargetEntName}" en el diagrama para eliminar.`,
+          actionType: 'UNKNOWN'
+        };
+      }
+    } else {
       const filteredEntities = entities.filter(e => e.id !== target.id);
       const filteredRels = relationships.filter(r => r.sourceEntityId !== target.id && r.targetEntityId !== target.id);
       return {
         model: { ...model, entities: filteredEntities, relationships: filteredRels, updatedAt: Date.now() },
-        summary: `Se eliminó la entidad "${target.name}" y sus relaciones del diagrama.`,
+        summary: `Se eliminó la tabla "${target.name}" y sus relaciones del diagrama.`,
         actionType: 'DELETE_ENTITY'
       };
     }

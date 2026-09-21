@@ -350,6 +350,8 @@ export const VoiceDiagrammingBar: React.FC<VoiceDiagrammingBarProps> = ({
             'Crear tabla Proveedor',
             'Añadir atributo telefono a Proveedor',
             'Editar atributo telefono a celular en Proveedor',
+            'Eliminar atributo telefono en Proveedor',
+            'Eliminar tabla Proveedor',
             'Añadir precio de tipo decimal a Producto',
             'Relacionar Proveedor con Producto',
             'Hacer id clave primaria en Proveedor'
