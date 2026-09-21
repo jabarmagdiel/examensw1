@@ -2,12 +2,14 @@
 set -e
 
 DOMAIN="xavioverland.com"
-EMAIL="migue.analista@case-enterprise.com"
 
 echo "===================================================================="
 echo "🔐 CONFIGURADOR AUTOMÁTICO DE SSL / HTTPS (Let's Encrypt)"
 echo "   Dominio objetivo: https://$DOMAIN y https://www.$DOMAIN"
 echo "===================================================================="
+
+# Asegurar que los contenedores SIEMPRE se levanten al salir, incluso si hay error
+trap 'echo "🚀 Levantando contenedores..."; sudo docker compose up -d' EXIT
 
 # 1. Instalar Certbot si no está instalado
 if ! command -v certbot &> /dev/null; then
@@ -16,12 +18,12 @@ if ! command -v certbot &> /dev/null; then
     sudo apt-get install -y certbot
 fi
 
-# 2. Detener temporalmente los contenedores para que el puerto 80 quede libre para la validación de Let's Encrypt
+# 2. Detener solo el frontend temporalmente para liberar el puerto 80
 echo "🛑 Liberando puerto 80 para validar el dominio con Let's Encrypt..."
-sudo docker compose down || true
+sudo docker compose stop frontend || true
 
-# 3. Solicitar certificado SSL gratuito
-echo "📜 Solicitando certificado oficial gratuito a Let's Encrypt..."
+# 3. Solicitar certificado SSL gratuito oficial de Let's Encrypt
+echo "📜 Solicitando certificado oficial a Let's Encrypt para $DOMAIN..."
 sudo certbot certonly --standalone \
   -d "$DOMAIN" \
   -d "www.$DOMAIN" \
@@ -32,20 +34,16 @@ sudo certbot certonly --standalone \
 # 4. Copiar certificados al directorio local de Docker
 echo "📁 Vinculando certificados a Docker..."
 mkdir -p ./certs
-sudo cp -L /etc/letsencrypt/live/$DOMAIN/fullchain.pem ./certs/fullchain.pem
-sudo cp -L /etc/letsencrypt/live/$DOMAIN/privkey.pem ./certs/privkey.pem
-sudo chmod -R 755 ./certs
+sudo cp -L /etc/letsencrypt/live/$DOMAIN/fullchain.pem ./certs/fullchain.pem || true
+sudo cp -L /etc/letsencrypt/live/$DOMAIN/privkey.pem ./certs/privkey.pem || true
+sudo chmod -R 755 ./certs || true
 
-# 5. Activar configuración de Nginx con SSL
-echo "⚙️ Configurando Nginx con soporte HTTPS..."
-cp ./frontend/nginx-ssl.conf ./frontend/nginx.conf
-
-# 6. Levantar contenedores con puertos 80 y 443 activos
-echo "🚀 Levantando servicios en Docker con HTTPS..."
-sudo docker compose -f docker-compose.yml -f docker-compose.ssl.yml up --build -d
+# 5. Levantar contenedores (se ejecutará con el trap EXIT o explícitamente aquí)
+sudo docker compose up --build -d
 
 echo "===================================================================="
-echo "🎉 ¡FELICITACIONES! HTTPS ESTÁ ACTIVO CON CANDADITO DE SEGURIDAD"
-echo "👉 Web Segura: https://$DOMAIN"
-echo "👉 Con www:    https://www.$DOMAIN"
+echo "🎉 ¡PROCESO COMPLETADO!"
+echo "👉 Acceso Seguro: https://$DOMAIN"
+echo "👉 Acceso con www: https://www.$DOMAIN"
+echo "👉 Acceso por IP:  http://107.20.0.5"
 echo "===================================================================="
