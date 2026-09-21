@@ -18,28 +18,37 @@ if ! command -v certbot &> /dev/null; then
     sudo apt-get install -y certbot
 fi
 
-# 2. Detener solo el frontend temporalmente para liberar el puerto 80
-echo "🛑 Liberando puerto 80 para validar el dominio con Let's Encrypt..."
-sudo docker compose stop frontend || true
+# 2. Detener contenedores temporalmente para liberar los puertos 80 y 443
+echo "🛑 Liberando puertos para validar el dominio con Let's Encrypt..."
+sudo docker compose down || true
+sudo fuser -k 80/tcp 2>/dev/null || true
+sudo fuser -k 443/tcp 2>/dev/null || true
 
 # 3. Solicitar certificado SSL gratuito oficial de Let's Encrypt
-echo "📜 Solicitando certificado oficial a Let's Encrypt para $DOMAIN..."
+echo "📜 Solicitando certificado oficial a Let's Encrypt para $DOMAIN y www.$DOMAIN..."
 sudo certbot certonly --standalone \
   -d "$DOMAIN" \
   -d "www.$DOMAIN" \
   --non-interactive \
   --agree-tos \
-  --register-unsafely-without-email || sudo certbot certonly --standalone -d "$DOMAIN" --non-interactive --agree-tos --register-unsafely-without-email
+  --register-unsafely-without-email || \
+sudo certbot certonly --standalone \
+  -d "$DOMAIN" \
+  --non-interactive \
+  --agree-tos \
+  --register-unsafely-without-email
 
 # 4. Copiar certificados al directorio local de Docker
 echo "📁 Vinculando certificados a Docker..."
 mkdir -p ./certs
-sudo cp -L /etc/letsencrypt/live/$DOMAIN/fullchain.pem ./certs/fullchain.pem || true
-sudo cp -L /etc/letsencrypt/live/$DOMAIN/privkey.pem ./certs/privkey.pem || true
-sudo chmod -R 755 ./certs || true
+sudo cp -L /etc/letsencrypt/live/$DOMAIN/fullchain.pem ./certs/fullchain.pem 2>/dev/null || sudo cp -L /etc/letsencrypt/live/*/fullchain.pem ./certs/fullchain.pem
+sudo cp -L /etc/letsencrypt/live/$DOMAIN/privkey.pem ./certs/privkey.pem 2>/dev/null || sudo cp -L /etc/letsencrypt/live/*/privkey.pem ./certs/privkey.pem
+sudo chmod 644 ./certs/fullchain.pem ./certs/privkey.pem
+sudo chmod 755 ./certs
 
-# 5. Levantar contenedores (se ejecutará con el trap EXIT o explícitamente aquí)
-sudo docker compose up --build -d
+# 5. Levantar todos los contenedores con el nuevo certificado
+echo "🚀 Levantando contenedores en segundo plano..."
+sudo docker compose up -d
 
 echo "===================================================================="
 echo "🎉 ¡PROCESO COMPLETADO!"
