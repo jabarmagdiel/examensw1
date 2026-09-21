@@ -5,7 +5,7 @@ WORKDIR /app
 
 # Copiar manifiesto e instalar dependencias de producción
 COPY package*.json ./
-RUN npm ci --omit=dev
+RUN npm install --omit=dev
 
 # Copiar código fuente del backend
 COPY src/ ./src/
