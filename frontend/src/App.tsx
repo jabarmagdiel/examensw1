@@ -82,25 +82,6 @@ const INITIAL_COLLABORATORS: UserPresence[] = [
     name: 'Migue',
     role: 'Analista',
     color: '#3b82f6',
-    cursor: { x: 260, y: 140 },
-    lastActive: Date.now(),
-    status: 'online'
-  },
-  {
-    id: 'user_disenador',
-    name: 'Sofía',
-    role: 'Diseñador',
-    color: '#a855f7',
-    cursor: { x: 580, y: 160 },
-    lastActive: Date.now(),
-    status: 'online'
-  },
-  {
-    id: 'user_implementador',
-    name: 'Alex',
-    role: 'Implementador',
-    color: '#10b981',
-    cursor: { x: 440, y: 420 },
     lastActive: Date.now(),
     status: 'online'
   }
@@ -345,13 +326,13 @@ export default function App() {
       });
 
       socket.on('users_updated', (updatedUsers: UserPresence[]) => {
-        if (updatedUsers && updatedUsers.length > 0) {
-          setCollaborators(prev => {
-            const map = new Map(prev.map(u => [u.id, u]));
-            updatedUsers.forEach(u => map.set(u.id, u));
-            return Array.from(map.values());
-          });
+        if (Array.isArray(updatedUsers)) {
+          setCollaborators(updatedUsers);
         }
+      });
+
+      socket.on('user_cursor', ({ userId, cursor }: any) => {
+        setCollaborators(prev => prev.map(u => u.id === userId ? { ...u, cursor } : u));
       });
 
       socket.on('model_updated', ({ model: remoteModel }: any) => {

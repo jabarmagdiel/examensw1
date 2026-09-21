@@ -340,15 +340,15 @@ export const ContextualAIAssistant: React.FC<ContextualAIAssistantProps> = ({
       {/* TRIGGER FLOTANTE: Burbuja del Asistente Virtual */}
       <div style={{
         position: 'fixed',
-        bottom: 20,
+        bottom: 24,
         right: 24,
         zIndex: 1100,
         display: 'flex',
         alignItems: 'center',
         gap: 8
       }}>
-        {/* Píldora de Detección Automática de Contexto */}
-        {!isOpen && (
+        {/* Píldora de Detección Automática de Contexto (Oculta en Canvas para no saturar el lienzo) */}
+        {!isOpen && activeModule !== 'canvas' && (
           <div
             onClick={onToggleOpen}
             style={{

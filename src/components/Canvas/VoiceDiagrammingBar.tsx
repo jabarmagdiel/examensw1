@@ -125,7 +125,7 @@ export const VoiceDiagrammingBar: React.FC<VoiceDiagrammingBarProps> = ({
       <div style={{
         position: 'absolute',
         bottom: 24,
-        right: 180,
+        right: 86,
         zIndex: 60,
         pointerEvents: 'auto'
       }}>

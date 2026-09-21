@@ -134,7 +134,7 @@ export const DiagramCanvas: React.FC<DiagramCanvasProps> = ({
   const BOX_WIDTH = 250;
   const BOX_HEIGHT = 160;
 
-  const [showCanvasGuide, setShowCanvasGuide] = useState(true);
+  const [showCanvasGuide, setShowCanvasGuide] = useState(false);
 
   return (
     <div
@@ -241,11 +241,11 @@ export const DiagramCanvas: React.FC<DiagramCanvasProps> = ({
         </div>
       )}
 
-      {/* Controles flotantes de Zoom y Añadir */}
+      {/* Controles flotantes de Zoom y Añadir (Esquina inferior izquierda para no solapar herramientas IA) */}
       <div style={{
         position: 'absolute',
-        bottom: 20,
-        right: 20,
+        bottom: 24,
+        left: 24,
         zIndex: 50,
         display: 'flex',
         flexDirection: 'column',
