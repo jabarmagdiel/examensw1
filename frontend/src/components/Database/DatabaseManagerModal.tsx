@@ -52,8 +52,8 @@ export const DatabaseManagerModal: React.FC<DatabaseManagerModalProps> = ({
     provider: 'Simulador Reactivo en Memoria',
     isSupabase: false,
     urlMasked: null,
-    tables: ['clientes', 'mascotas', 'veterinarios', 'citas_medicas', 'system_users'],
-    counts: { clientes: 3, mascotas: 3, veterinarios: 2, citas_medicas: 2, system_users: 4 }
+    tables: ['clientes', 'mascotas', 'veterinarios', 'citas_medicas', 'proveedores', 'medicamentos', 'lotes', 'ventas', 'productos', 'pedidos', 'usuarios', 'system_users'],
+    counts: { clientes: 3, mascotas: 3, veterinarios: 2, citas_medicas: 2, proveedores: 3, medicamentos: 3, lotes: 2, ventas: 2, productos: 3, pedidos: 2, usuarios: 3, system_users: 4 }
   });
 
   // Formulario para Crear / Editar Registro
@@ -134,10 +134,56 @@ export const DatabaseManagerModal: React.FC<DatabaseManagerModalProps> = ({
         { id: 1, fecha: '2026-09-18', motivo: 'Control anual y vacunación', diagnostico: 'Paciente sano', costo: 120.00, mascota_id: 1, veterinario_id: 1 },
         { id: 2, fecha: '2026-09-19', motivo: 'Revisión dental', diagnostico: 'Limpieza recomendada', costo: 85.00, mascota_id: 2, veterinario_id: 2 }
       ];
+    } else if (table === 'proveedores') {
+      return [
+        { id: 1, razon_social: 'Laboratorios Farmacéuticos Andinos', nit: '1029384756', telefono: '+591 2 2456789', direccion: 'Zona Industrial #500' },
+        { id: 2, razon_social: 'Distribuidora Médica Global S.R.L.', nit: '9847362019', telefono: '+591 3 3341122', direccion: 'Av. Banzer Km 6' },
+        { id: 3, razon_social: 'Insumos Hospitalarios Santa Cruz', nit: '5566778899', telefono: '+591 4 4567890', direccion: 'Calle Sucre #230' }
+      ];
+    } else if (table === 'medicamentos') {
+      return [
+        { id: 1, codigo_barras: '7771234567890', nombre_comercial: 'Amoxicilina 500mg', principio_activo: 'Amoxicilina Trihidrato', precio: 15.50, stock: 120 },
+        { id: 2, codigo_barras: '7779876543210', nombre_comercial: 'Ibuprofeno Forte 400mg', principio_activo: 'Ibuprofeno', precio: 8.00, stock: 250 },
+        { id: 3, codigo_barras: '7774561237895', nombre_comercial: 'Paracetamol Jarabe 120ml', principio_activo: 'Paracetamol', precio: 12.00, stock: 80 }
+      ];
+    } else if (table === 'lotes') {
+      return [
+        { id: 1, numero_lote: 'LT-2026-09A', fecha_vencimiento: '2028-06-30', stock_actual: 120, medicamento_id: 1 },
+        { id: 2, numero_lote: 'LT-2026-11C', fecha_vencimiento: '2027-12-15', stock_actual: 250, medicamento_id: 2 }
+      ];
+    } else if (table === 'ventas') {
+      return [
+        { id: 1, fecha_hora: '2026-09-20 10:30:00', total: 45.50, cliente_nombre: 'Mariana Flores', estado: 'Completada' },
+        { id: 2, fecha_hora: '2026-09-21 15:45:00', total: 112.00, cliente_nombre: 'Roberto Vaca', estado: 'Completada' }
+      ];
+    } else if (table === 'productos') {
+      return [
+        { id: 1, sku: 'PROD-LAPTOP-01', nombre: 'Laptop Ultrabook 14"', precio: 850.00, stock: 15 },
+        { id: 2, sku: 'PROD-MOUSE-02', nombre: 'Mouse Ergonómico Inalámbrico', precio: 25.00, stock: 60 },
+        { id: 3, sku: 'PROD-KEYB-03', nombre: 'Teclado Mecánico RGB', precio: 65.00, stock: 35 }
+      ];
+    } else if (table === 'pedidos') {
+      return [
+        { id: 1, fecha: '2026-09-19', total: 875.00, estado: 'Enviado', usuario_id: 1 },
+        { id: 2, fecha: '2026-09-20', total: 90.00, estado: 'Entregado', usuario_id: 2 }
+      ];
+    } else if (table === 'usuarios') {
+      return [
+        { id: 1, email: 'cliente.vip@gmail.com', nombre: 'Diego Morales', rol: 'Cliente' },
+        { id: 2, email: 'laura.compras@empresa.bo', nombre: 'Laura Paz', rol: 'Cliente' },
+        { id: 3, email: 'admin.store@tienda.com', nombre: 'Administrador Tienda', rol: 'Admin' }
+      ];
+    } else if (table === 'system_users') {
+      return [
+        { id: 'usr_migue', name: 'Migue', email: 'migue.director@case-enterprise.com', role: 'Administrador', status: 'active' },
+        { id: 'usr_sofia', name: 'Lic. Sofía Reyes', email: 'sofia.analista@case-enterprise.com', role: 'Analista', status: 'active' },
+        { id: 'usr_alex', name: 'Ing. Alex Rivera', email: 'alex.desarrollador@case-enterprise.com', role: 'Implementador', status: 'active' },
+        { id: 'usr_carlos', name: 'Arq. Carlos Mendoza', email: 'carlos.disenador@case-enterprise.com', role: 'Diseñador', status: 'active' }
+      ];
     }
     return [
-      { id: 1, nombre: `Registro demo 1 de ${table}` },
-      { id: 2, nombre: `Registro demo 2 de ${table}` }
+      { id: 1, nombre: `Registro demo 1 de ${table}`, created_at: '2026-09-21' },
+      { id: 2, nombre: `Registro demo 2 de ${table}`, created_at: '2026-09-21' }
     ];
   };
 

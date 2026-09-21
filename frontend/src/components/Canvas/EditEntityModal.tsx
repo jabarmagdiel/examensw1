@@ -54,6 +54,10 @@ export const EditEntityModal: React.FC<EditEntityModalProps> = ({
     setNewAttrNullable(false);
   };
 
+  const handleUpdateAttribute = (id: string, field: 'name' | 'type', value: any) => {
+    setAttributes(attributes.map(a => a.id === id ? { ...a, [field]: value } : a));
+  };
+
   const handleRemoveAttribute = (id: string) => {
     setAttributes(attributes.filter(a => a.id !== id));
   };
@@ -123,51 +127,95 @@ export const EditEntityModal: React.FC<EditEntityModalProps> = ({
           </div>
         </div>
 
-        {/* Lista de Atributos */}
+        {/* Lista de Atributos Editables */}
         <div style={{ marginBottom: 16 }}>
-          <h3 style={{ fontSize: 13, fontWeight: 600, marginBottom: 8, color: 'var(--text-secondary)' }}>
-            Atributos de la Entidad ({attributes.length})
-          </h3>
-          <div style={{ display: 'flex', flexDirection: 'column', gap: 6, maxHeight: 220, overflowY: 'auto', paddingRight: 4 }}>
+          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 8 }}>
+            <h3 style={{ fontSize: 13, fontWeight: 600, margin: 0, color: 'var(--text-secondary)' }}>
+              Atributos de la Entidad ({attributes.length})
+            </h3>
+            <span style={{ fontSize: 10, color: '#94a3b8' }}>
+              💡 Puedes editar directamente el nombre o tipo de cada campo
+            </span>
+          </div>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 6, maxHeight: 240, overflowY: 'auto', paddingRight: 4 }}>
             {attributes.map(attr => (
               <div
                 key={attr.id}
                 style={{
                   display: 'flex',
                   alignItems: 'center',
-                  justifyContent: 'space-between',
-                  background: 'var(--bg-surface)',
-                  padding: '6px 12px',
+                  gap: 8,
+                  background: 'rgba(255, 255, 255, 0.04)',
+                  padding: '6px 10px',
                   borderRadius: 6,
                   border: '1px solid var(--border-subtle)'
                 }}
               >
-                <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                  <button
-                    onClick={() => handleTogglePK(attr.id)}
-                    style={{
-                      background: attr.isPrimaryKey ? 'rgba(245, 158, 11, 0.2)' : 'rgba(255, 255, 255, 0.05)',
-                      color: attr.isPrimaryKey ? '#fbbf24' : 'var(--text-muted)',
-                      border: `1px solid ${attr.isPrimaryKey ? '#f59e0b' : 'var(--border-subtle)'}`,
-                      padding: '2px 6px',
-                      borderRadius: 4,
-                      fontSize: 10,
-                      fontWeight: 600
-                    }}
-                    title="Alternar Clave Primaria (PK)"
-                  >
-                    <Key size={10} style={{ marginRight: 2 }} /> PK
-                  </button>
-                  <span style={{ fontSize: 12, fontWeight: 500, color: '#fff' }}>{attr.name}</span>
-                  <span style={{ fontSize: 11, color: 'var(--text-muted)', fontFamily: 'var(--font-mono)' }}>({attr.type})</span>
-                </div>
+                <button
+                  type="button"
+                  onClick={() => handleTogglePK(attr.id)}
+                  style={{
+                    background: attr.isPrimaryKey ? 'rgba(245, 158, 11, 0.25)' : 'rgba(255, 255, 255, 0.05)',
+                    color: attr.isPrimaryKey ? '#fbbf24' : 'var(--text-muted)',
+                    border: `1px solid ${attr.isPrimaryKey ? '#f59e0b' : 'var(--border-subtle)'}`,
+                    padding: '4px 8px',
+                    borderRadius: 4,
+                    fontSize: 10,
+                    fontWeight: 600,
+                    cursor: 'pointer',
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: 3,
+                    flexShrink: 0
+                  }}
+                  title="Alternar Clave Primaria (PK)"
+                >
+                  <Key size={10} /> PK
+                </button>
+
+                <input
+                  type="text"
+                  value={attr.name}
+                  onChange={e => handleUpdateAttribute(attr.id, 'name', e.target.value)}
+                  style={{
+                    flex: 2,
+                    background: 'rgba(0, 0, 0, 0.35)',
+                    border: '1px solid var(--border-subtle)',
+                    padding: '5px 8px',
+                    borderRadius: 4,
+                    color: '#fff',
+                    fontSize: 12,
+                    fontFamily: 'var(--font-mono)'
+                  }}
+                  placeholder="Nombre atributo"
+                />
+
+                <select
+                  value={attr.type}
+                  onChange={e => handleUpdateAttribute(attr.id, 'type', e.target.value as DataType)}
+                  style={{
+                    flex: 1.2,
+                    background: '#11192e',
+                    border: '1px solid var(--border-subtle)',
+                    padding: '5px 8px',
+                    borderRadius: 4,
+                    color: '#38bdf8',
+                    fontSize: 11,
+                    fontWeight: 600,
+                    fontFamily: 'var(--font-mono)'
+                  }}
+                >
+                  {DATA_TYPES.map(t => <option key={t} value={t}>{t}</option>)}
+                </select>
 
                 <button
+                  type="button"
                   className="btn-icon"
-                  style={{ width: 22, height: 22 }}
+                  style={{ width: 26, height: 26, flexShrink: 0 }}
                   onClick={() => handleRemoveAttribute(attr.id)}
+                  title="Eliminar atributo"
                 >
-                  <Trash2 size={12} color="#f43f5e" />
+                  <Trash2 size={13} color="#f43f5e" />
                 </button>
               </div>
             ))}

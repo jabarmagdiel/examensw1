@@ -129,6 +129,39 @@ export const VOICE_COMMANDS_GUIDE: VoiceCommandGuideItem[] = [
 ];
 
 /**
+ * Busca una entidad por nombre tolerando mayúsculas, acentos, plurales o tableName.
+ */
+export function findEntityFlexible(searchName: string, entities: Entity[]): Entity | undefined {
+  const norm = stripAccents(searchName).trim().toLowerCase();
+  let found = entities.find(e => stripAccents(e.name).toLowerCase() === norm || (e.tableName && stripAccents(e.tableName).toLowerCase() === norm));
+  if (found) return found;
+
+  const singular = norm.endsWith('es') ? norm.slice(0, -2) : norm.endsWith('s') ? norm.slice(0, -1) : norm;
+  found = entities.find(e => {
+    const eNorm = stripAccents(e.name).toLowerCase();
+    const eSingular = eNorm.endsWith('es') ? eNorm.slice(0, -2) : eNorm.endsWith('s') ? eNorm.slice(0, -1) : eNorm;
+    return eNorm === singular || eSingular === singular || eSingular === norm || eNorm === norm + 's' || eNorm === norm + 'es';
+  });
+  return found;
+}
+
+/**
+ * Busca un atributo dentro de una entidad tolerando mayúsculas, acentos y plurales.
+ */
+export function findAttributeFlexible(searchName: string, attributes: Attribute[]): Attribute | undefined {
+  const norm = cleanIdentifier(stripAccents(searchName)).toLowerCase();
+  let found = attributes.find(a => cleanIdentifier(stripAccents(a.name)).toLowerCase() === norm);
+  if (found) return found;
+
+  const singular = norm.endsWith('es') ? norm.slice(0, -2) : norm.endsWith('s') ? norm.slice(0, -1) : norm;
+  return attributes.find(a => {
+    const aNorm = cleanIdentifier(stripAccents(a.name)).toLowerCase();
+    const aSingular = aNorm.endsWith('es') ? aNorm.slice(0, -2) : aNorm.endsWith('s') ? aNorm.slice(0, -1) : aNorm;
+    return aNorm === singular || aSingular === singular || aSingular === norm || aNorm === norm + 's' || aNorm === norm + 'es';
+  });
+}
+
+/**
  * MOTOR DE GRAFICADO POR VOZ EN TIEMPO REAL:
  * Interpreta instrucciones granulares para manipular directamente el diagrama sobre el canvas.
  */
@@ -147,14 +180,14 @@ export function executeVoiceCommand(
   const functionalDependencies = [...model.functionalDependencies];
 
   // 1. COMANDO: Editar o Renombrar Atributo
-  // Ej: "editar atributo telefono a celular en Proveedor", "cambiar atributo nombre a razon_social en Proveedor"
-  const editAttrMatch = cleanText.match(/(?:editar|cambiar|modificar|renombrar)\s+(?:el\s+)?(?:atributo|campo|columna)?\s*([a-zA-Z0-9_]+)\s+(?:a|por)\s+([a-zA-Z0-9_]+)\s+(?:en|de|para)\s+(?:la\s+)?(?:entidad\s+|clase\s+|tabla\s+)?([a-zA-Z0-9_]+)/i);
+  // Ej: "editar atributo telefono a celular en Proveedor", "cambiar atributo nombre a razon_social en Proveedor", "modificar campo costo por precio en Proveedor"
+  const editAttrMatch = cleanText.match(/(?:editar|cambiar|modificar|renombrar)\s+(?:el\s+|la\s+)?(?:nombre\s+de\s+|nombre\s+del\s+)?(?:atributo|campo|columna)?\s*([a-zA-Z0-9_]+)\s+(?:a|por)\s+([a-zA-Z0-9_]+)\s+(?:en|de|para)\s+(?:la\s+|el\s+)?(?:entidad\s+|clase\s+|tabla\s+)?([a-zA-Z0-9_]+)/i);
   if (editAttrMatch) {
     const oldAttrName = cleanIdentifier(editAttrMatch[1]).toLowerCase();
     const newAttrName = cleanIdentifier(editAttrMatch[2]).toLowerCase();
     const entityName = editAttrMatch[3].toLowerCase();
 
-    const targetEntity = entities.find(e => stripAccents(e.name).toLowerCase() === entityName);
+    const targetEntity = findEntityFlexible(entityName, entities);
     if (!targetEntity) {
       return {
         model,
@@ -163,7 +196,7 @@ export function executeVoiceCommand(
       };
     }
 
-    const attr = targetEntity.attributes.find(a => cleanIdentifier(a.name).toLowerCase() === oldAttrName);
+    const attr = findAttributeFlexible(oldAttrName, targetEntity.attributes);
     if (!attr) {
       return {
         model,
@@ -172,10 +205,11 @@ export function executeVoiceCommand(
       };
     }
 
+    const prevName = attr.name;
     attr.name = newAttrName;
     return {
       model: { ...model, entities, updatedAt: Date.now() },
-      summary: `Atributo "${oldAttrName}" renombrado exitosamente a "${newAttrName}" en ${targetEntity.name}.`,
+      summary: `Atributo "${prevName}" renombrado exitosamente a "${newAttrName}" en ${targetEntity.name}.`,
       actionType: 'ADD_ATTRIBUTE'
     };
   }
@@ -188,9 +222,9 @@ export function executeVoiceCommand(
     const newTypeStr = changeTypeMatch[2].toLowerCase();
     const entityName = changeTypeMatch[3].toLowerCase();
 
-    const targetEntity = entities.find(e => stripAccents(e.name).toLowerCase() === entityName);
+    const targetEntity = findEntityFlexible(entityName, entities);
     if (targetEntity) {
-      const attr = targetEntity.attributes.find(a => cleanIdentifier(a.name).toLowerCase() === attrName);
+      const attr = findAttributeFlexible(attrName, targetEntity.attributes);
       if (attr) {
         attr.type = parseDataType(newTypeStr);
         return {
@@ -201,41 +235,6 @@ export function executeVoiceCommand(
       }
     }
   }
-
-/**
- * Busca una entidad por nombre tolerando mayúsculas, acentos, plurales o tableName.
- */
-function findEntityFlexible(searchName: string, entities: Entity[]): Entity | undefined {
-  const norm = stripAccents(searchName).trim().toLowerCase();
-  // 1. Coincidencia exacta de nombre o tableName
-  let found = entities.find(e => stripAccents(e.name).toLowerCase() === norm || (e.tableName && stripAccents(e.tableName).toLowerCase() === norm));
-  if (found) return found;
-
-  // 2. Variaciones singular / plural ('s', 'es')
-  const singular = norm.endsWith('es') ? norm.slice(0, -2) : norm.endsWith('s') ? norm.slice(0, -1) : norm;
-  found = entities.find(e => {
-    const eNorm = stripAccents(e.name).toLowerCase();
-    const eSingular = eNorm.endsWith('es') ? eNorm.slice(0, -2) : eNorm.endsWith('s') ? eNorm.slice(0, -1) : eNorm;
-    return eNorm === singular || eSingular === singular || eSingular === norm || eNorm === norm + 's' || eNorm === norm + 'es';
-  });
-  return found;
-}
-
-/**
- * Busca un atributo dentro de una entidad tolerando mayúsculas, acentos y plurales.
- */
-function findAttributeFlexible(searchName: string, attributes: Attribute[]): Attribute | undefined {
-  const norm = cleanIdentifier(stripAccents(searchName)).toLowerCase();
-  let found = attributes.find(a => cleanIdentifier(stripAccents(a.name)).toLowerCase() === norm);
-  if (found) return found;
-
-  const singular = norm.endsWith('es') ? norm.slice(0, -2) : norm.endsWith('s') ? norm.slice(0, -1) : norm;
-  return attributes.find(a => {
-    const aNorm = cleanIdentifier(stripAccents(a.name)).toLowerCase();
-    const aSingular = aNorm.endsWith('es') ? aNorm.slice(0, -2) : aNorm.endsWith('s') ? aNorm.slice(0, -1) : aNorm;
-    return aNorm === singular || aSingular === singular || aSingular === norm || aNorm === norm + 's' || aNorm === norm + 'es';
-  });
-}
 
   // 3. COMANDO: Eliminar Atributo
   // Acepta: "eliminar atributo telefono en Proveedor", "borrar campo direccion de Cliente",
@@ -574,7 +573,7 @@ export function processNaturalLanguagePrompt(
 /**
  * Genera el dominio del sistema de Farmacia
  */
-function createFarmaciaDomain(): {
+export function createFarmaciaDomain(): {
   entities: Entity[];
   relationships: Relationship[];
   functionalDependencies: FunctionalDependency[];
@@ -667,7 +666,7 @@ function createFarmaciaDomain(): {
 /**
  * Genera el dominio del sistema de Veterinaria (Escenario explícito del examen)
  */
-function createVeterinariaDomain(): {
+export function createVeterinariaDomain(): {
   entities: Entity[];
   relationships: Relationship[];
   functionalDependencies: FunctionalDependency[];
@@ -804,7 +803,7 @@ function createVeterinariaDomain(): {
   };
 }
 
-function createEcommerceDomain(): {
+export function createEcommerceDomain(): {
   entities: Entity[];
   relationships: Relationship[];
   functionalDependencies: FunctionalDependency[];

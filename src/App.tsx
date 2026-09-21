@@ -24,12 +24,12 @@ import { DashboardView } from './components/Dashboard/DashboardView';
 import { MobileAppView } from './components/Mobile/MobileAppView';
 import { DatabaseManagerModal } from './components/Database/DatabaseManagerModal';
 import { DiagramModel, Entity, FunctionalDependency, ProjectFolder, Relationship, SystemRole, SystemUser, UserPresence } from './types/case';
-import { processNaturalLanguagePrompt, getOfflineVoiceQueue } from './services/aiAssistant';
+import { processNaturalLanguagePrompt, getOfflineVoiceQueue, createVeterinariaDomain, createFarmaciaDomain, createEcommerceDomain } from './services/aiAssistant';
 
-// Proyectos iniciales de la empresa de software
-const DOMAIN_VETERINARIA = processNaturalLanguagePrompt('veterinaria');
-const DOMAIN_FARMACIA = processNaturalLanguagePrompt('farmacia');
-const DOMAIN_ECOMMERCE = processNaturalLanguagePrompt('tienda');
+// Proyectos iniciales de la empresa de software cargados con datos completos de prueba
+const DOMAIN_VETERINARIA = createVeterinariaDomain();
+const DOMAIN_FARMACIA = createFarmaciaDomain();
+const DOMAIN_ECOMMERCE = createEcommerceDomain();
 
 const INITIAL_FOLDERS: ProjectFolder[] = [
   { id: 'f_1', name: 'Sector Salud & Veterinarias', color: '#3b82f6', createdAt: Date.now() },
@@ -148,7 +148,13 @@ export default function App() {
   const [projects, setProjects] = useState<DiagramModel[]>(() => {
     try {
       const saved = localStorage.getItem('case_ai_projects');
-      return saved ? JSON.parse(saved) : INITIAL_PROJECTS;
+      if (saved) {
+        const parsed: DiagramModel[] = JSON.parse(saved);
+        if (parsed.length > 0 && parsed.some(p => p.entities && p.entities.length > 0)) {
+          return parsed;
+        }
+      }
+      return INITIAL_PROJECTS;
     } catch {
       return INITIAL_PROJECTS;
     }
@@ -256,7 +262,10 @@ export default function App() {
           setFolders(data.folders);
         }
         if (data.projects && data.projects.length > 0) {
-          setProjects(data.projects);
+          const hasEntities = data.projects.some((p: DiagramModel) => p.entities && p.entities.length > 0);
+          if (hasEntities) {
+            setProjects(data.projects);
+          }
         }
       })
       .catch(() => {});
@@ -289,7 +298,10 @@ export default function App() {
           setFolders(remoteFolders);
         }
         if (remoteProjects && remoteProjects.length > 0) {
-          setProjects(remoteProjects);
+          const hasEntities = remoteProjects.some((p: DiagramModel) => p.entities && p.entities.length > 0);
+          if (hasEntities) {
+            setProjects(remoteProjects);
+          }
         }
       });
 
