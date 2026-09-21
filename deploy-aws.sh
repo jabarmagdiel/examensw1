@@ -24,15 +24,15 @@ fi
 
 # 2. Levantar los 3 servicios con Docker Compose (Postgres + Backend + Frontend)
 echo "🐳 Construyendo y levantando contenedores (PostgreSQL 16, Backend API, Frontend Nginx)..."
-docker compose down || true
-docker compose up --build -d
+sudo docker compose down || true
+sudo docker compose up --build -d
 
 # 3. Esperar que PostgreSQL y Backend estén listos
 echo "⏳ Esperando inicio de la base de datos y la API..."
 sleep 8
 
 # 4. Verificar estado
-docker compose ps
+sudo docker compose ps
 
 echo "===================================================================="
 echo "🎉 ¡DESPLIEGUE EXITOSO EN AWS!"
