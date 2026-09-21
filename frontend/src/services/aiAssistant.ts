@@ -45,6 +45,19 @@ function parseDataType(typeStr?: string): DataType {
   return 'VARCHAR';
 }
 
+function stripAccents(str: string): string {
+  if (!str) return '';
+  return str.normalize('NFD').replace(/[\u0300-\u036f]/g, '');
+}
+
+function cleanIdentifier(str: string): string {
+  if (!str) return '';
+  return stripAccents(str)
+    .trim()
+    .replace(/[^a-zA-Z0-9_]/g, '_')
+    .replace(/^_+|_+$/g, '');
+}
+
 /**
  * MOTOR DE GRAFICADO POR VOZ EN TIEMPO REAL:
  * Interpreta instrucciones granulares para manipular directamente el diagrama sobre el canvas.
@@ -57,73 +70,91 @@ export function executeVoiceCommand(
   summary: string;
   actionType: 'ADD_ENTITY' | 'ADD_ATTRIBUTE' | 'SET_PK' | 'ADD_RELATIONSHIP' | 'DELETE_ENTITY' | 'GENERATE_DOMAIN' | 'UNKNOWN';
 } {
-  const text = transcript.trim().toLowerCase();
+  const rawText = transcript.trim().replace(/[.,;!?]+$/, '');
+  const cleanText = stripAccents(rawText).toLowerCase();
   const entities = [...model.entities.map(e => ({ ...e, attributes: [...e.attributes] }))];
   const relationships = [...model.relationships];
   const functionalDependencies = [...model.functionalDependencies];
 
-  // 1. COMANDO: Añadir atributo a entidad existente
-  // Ejemplos:
-  // "añadir atributo nombre de tipo texto a Proveedor"
-  // "agregar campo precio de tipo decimal a Producto"
-  // "crear atributo telefono en Cliente"
-  const addAttrMatch = transcript.match(/(?:agrega(?:r)?|añad(?:ir|e)|crea(?:r)?)\s+(?:el\s+)?(?:atributo|campo|propiedad)\s+([a-zA-Z0-9_]+)(?:\s+de\s+tipo\s+([a-zA-Z0-9_]+))?\s+(?:a|en|para)\s+(?:la\s+entidad\s+|la\s+clase\s+|la\s+tabla\s+)?([a-zA-Z0-9_]+)/i);
+  // 1. COMANDO: Añadir atributo a entidad
+  // Acepta: "añadir atributo teléfono a proveedor", "agregar campo precio de tipo decimal a Producto", "poner telefono en Cliente", "añadir telefono a proveedor"
+  const addAttrMatch = cleanText.match(/(?:agrega(?:r)?|anad(?:ir|e)|crea(?:r)?|inserta(?:r)?|pon(?:er)?)\s+(?:el\s+)?(?:atributo|campo|propiedad|columna)?\s*([a-zA-Z0-9_]+)(?:\s+de\s+tipo\s+([a-zA-Z0-9_]+))?\s+(?:a|en|para)\s+(?:la\s+)?(?:entidad\s+|clase\s+|tabla\s+)?([a-zA-Z0-9_]+)/i);
 
   if (addAttrMatch) {
-    const attrName = addAttrMatch[1].trim();
+    const rawAttrName = addAttrMatch[1];
     const typeStr = addAttrMatch[2];
-    const targetEntityName = addAttrMatch[3].trim().toLowerCase();
+    const rawEntityName = addAttrMatch[3];
+    const attrName = cleanIdentifier(rawAttrName).toLowerCase();
+    const entityName = rawEntityName.toLowerCase();
 
-    const targetEntity = entities.find(e => e.name.toLowerCase() === targetEntityName);
-    if (targetEntity) {
-      const existingAttr = targetEntity.attributes.find(a => a.name.toLowerCase() === attrName.toLowerCase());
-      if (existingAttr) {
-        return {
-          model,
-          summary: `El atributo "${attrName}" ya existe en la entidad ${targetEntity.name}.`,
-          actionType: 'UNKNOWN'
-        };
-      }
+    // Buscar entidad coincidente (ignorando acentos y mayúsculas)
+    let targetEntity = entities.find(e => stripAccents(e.name).toLowerCase() === entityName);
 
+    if (!targetEntity) {
+      // Auto-crear la entidad si no existe previamente
+      const cleanEntityTitle = rawEntityName.charAt(0).toUpperCase() + rawEntityName.slice(1);
       const inferredType = parseDataType(typeStr || attrName);
-      targetEntity.attributes.push({
-        id: `attr_${Date.now()}_${Math.random().toString(36).substr(2, 4)}`,
-        name: attrName,
-        type: inferredType,
-        isPrimaryKey: false,
-        isNullable: true
-      });
-
-      const updatedModel: DiagramModel = {
-        ...model,
-        entities,
-        updatedAt: Date.now()
+      targetEntity = {
+        id: `ent_${Date.now()}`,
+        name: cleanEntityTitle,
+        tableName: cleanEntityTitle.toLowerCase() + 's',
+        x: 120 + (entities.length % 3) * 280,
+        y: 120 + Math.floor(entities.length / 3) * 240,
+        attributes: [
+          { id: `attr_${Date.now()}_id`, name: 'id', type: 'BIGINT', isPrimaryKey: true, isNullable: false },
+          { id: `attr_${Date.now()}_attr`, name: attrName, type: inferredType, isPrimaryKey: false, isNullable: true }
+        ]
       };
+      entities.push(targetEntity);
 
       return {
-        model: updatedModel,
-        summary: `Atributo "${attrName}" (${inferredType}) añadido exitosamente a la clase ${targetEntity.name}.`,
-        actionType: 'ADD_ATTRIBUTE'
+        model: { ...model, entities, updatedAt: Date.now() },
+        summary: `Se creó la clase "${cleanEntityTitle}" y se añadió el atributo "${attrName}" (${inferredType}).`,
+        actionType: 'ADD_ENTITY'
       };
-    } else {
+    }
+
+    // Si ya existe la entidad, verificar si el atributo existe
+    const existingAttr = targetEntity.attributes.find(a => cleanIdentifier(a.name).toLowerCase() === attrName);
+    if (existingAttr) {
       return {
         model,
-        summary: `No se encontró la entidad "${addAttrMatch[3]}" para agregar el atributo.`,
+        summary: `El atributo "${attrName}" ya existe en la entidad ${targetEntity.name}.`,
         actionType: 'UNKNOWN'
       };
     }
+
+    const inferredType = parseDataType(typeStr || attrName);
+    targetEntity.attributes.push({
+      id: `attr_${Date.now()}_${Math.random().toString(36).substr(2, 4)}`,
+      name: attrName,
+      type: inferredType,
+      isPrimaryKey: false,
+      isNullable: true
+    });
+
+    const updatedModel: DiagramModel = {
+      ...model,
+      entities,
+      updatedAt: Date.now()
+    };
+
+    return {
+      model: updatedModel,
+      summary: `Atributo "${attrName}" (${inferredType}) añadido exitosamente a la clase ${targetEntity.name}.`,
+      actionType: 'ADD_ATTRIBUTE'
+    };
   }
 
   // 2. COMANDO: Establecer clave primaria (PK)
-  // Ejemplos: "hacer que codigo sea clave primaria en Proveedor", "poner dni como clave primaria en Cliente"
-  const pkMatch = transcript.match(/(?:hacer\s+que|poner|marcar)\s+([a-zA-Z0-9_]+)\s+como\s+(?:clave|llave)\s+primaria\s+en\s+([a-zA-Z0-9_]+)/i);
+  const pkMatch = cleanText.match(/(?:hacer\s+que|poner|marcar)\s+([a-zA-Z0-9_]+)\s+como\s+(?:clave|llave)\s+primaria\s+en\s+(?:la\s+)?(?:entidad\s+|clase\s+|tabla\s+)?([a-zA-Z0-9_]+)/i);
   if (pkMatch) {
-    const attrName = pkMatch[1].trim().toLowerCase();
-    const entityName = pkMatch[2].trim().toLowerCase();
+    const attrName = cleanIdentifier(pkMatch[1]).toLowerCase();
+    const entityName = pkMatch[2].toLowerCase();
 
-    const target = entities.find(e => e.name.toLowerCase() === entityName);
+    const target = entities.find(e => stripAccents(e.name).toLowerCase() === entityName);
     if (target) {
-      const attr = target.attributes.find(a => a.name.toLowerCase() === attrName);
+      const attr = target.attributes.find(a => cleanIdentifier(a.name).toLowerCase() === attrName);
       if (attr) {
         attr.isPrimaryKey = true;
         attr.isNullable = false;
@@ -137,19 +168,14 @@ export function executeVoiceCommand(
   }
 
   // 3. COMANDO: Crear relación entre dos entidades
-  // Ejemplos:
-  // "crear relación de uno a muchos entre Cliente y Mascota"
-  // "relacionar Proveedor con Producto de uno a muchos"
-  // "conectar CitaMedica con Mascota"
-  const relMatch = transcript.match(/(?:crear?\s+relaci[oó]n|relacionar|conectar)(?:\s+de\s+(uno\s+a\s+uno|uno\s+a\s+muchos|muchos\s+a\s+muchos))?\s+(?:entre\s+)?([a-zA-Z0-9_]+)\s+(?:y|con)\s+([a-zA-Z0-9_]+)/i);
-
+  const relMatch = cleanText.match(/(?:crear?\s+relacion|relacionar|conectar)(?:\s+de\s+(uno\s+a\s+uno|uno\s+a\s+muchos|muchos\s+a\s+muchos))?\s+(?:entre\s+)?(?:la\s+)?(?:entidad\s+|clase\s+|tabla\s+)?([a-zA-Z0-9_]+)\s+(?:y|con)\s+(?:la\s+)?(?:entidad\s+|clase\s+|tabla\s+)?([a-zA-Z0-9_]+)/i);
   if (relMatch) {
     const cardStr = (relMatch[1] || '').toLowerCase();
-    const srcName = relMatch[2].trim().toLowerCase();
-    const tgtName = relMatch[3].trim().toLowerCase();
+    const srcName = relMatch[2].toLowerCase();
+    const tgtName = relMatch[3].toLowerCase();
 
-    const src = entities.find(e => e.name.toLowerCase() === srcName);
-    const tgt = entities.find(e => e.name.toLowerCase() === tgtName);
+    const src = entities.find(e => stripAccents(e.name).toLowerCase() === srcName);
+    const tgt = entities.find(e => stripAccents(e.name).toLowerCase() === tgtName);
 
     if (src && tgt) {
       let cardinality: Cardinality = '1:N';
@@ -175,11 +201,10 @@ export function executeVoiceCommand(
   }
 
   // 4. COMANDO: Eliminar entidad
-  // Ejemplos: "eliminar entidad HistorialClinico", "borrar tabla CitaMedica"
-  const delMatch = transcript.match(/(?:eliminar|borrar|quitar)\s+(?:la\s+)?(?:entidad|clase|tabla)\s+([a-zA-Z0-9_]+)/i);
+  const delMatch = cleanText.match(/(?:eliminar|borrar|quitar)\s+(?:la\s+)?(?:entidad|clase|tabla)\s+([a-zA-Z0-9_]+)/i);
   if (delMatch) {
-    const entName = delMatch[1].trim().toLowerCase();
-    const target = entities.find(e => e.name.toLowerCase() === entName);
+    const entName = delMatch[1].toLowerCase();
+    const target = entities.find(e => stripAccents(e.name).toLowerCase() === entName);
     if (target) {
       const filteredEntities = entities.filter(e => e.id !== target.id);
       const filteredRels = relationships.filter(r => r.sourceEntityId !== target.id && r.targetEntityId !== target.id);
@@ -192,11 +217,11 @@ export function executeVoiceCommand(
   }
 
   // 5. COMANDO: Crear nueva entidad / clase
-  // Ejemplos: "crear clase Factura", "añadir entidad Proveedor con telefono y direccion"
-  const addEntityMatch = transcript.match(/(?:crear?|agrega(?:r)?|añad(?:ir|e))\s+(?:la\s+)?(?:entidad|clase|tabla)\s+([a-zA-Z0-9_]+)(?:\s+(?:con\s+atributos?|con\s+campos?)\s+(.+))?/i);
+  const addEntityMatch = cleanText.match(/(?:crear?|agrega(?:r)?|anad(?:ir|e)|inserta(?:r)?)\s+(?:la\s+)?(?:entidad|clase|tabla)\s+([a-zA-Z0-9_]+)(?:\s+(?:con\s+atributos?|con\s+campos?|con)\s+(.+))?/i);
   if (addEntityMatch) {
-    const entityName = addEntityMatch[1].charAt(0).toUpperCase() + addEntityMatch[1].slice(1);
-    const existing = entities.find(e => e.name.toLowerCase() === entityName.toLowerCase());
+    const rawName = addEntityMatch[1];
+    const entityName = rawName.charAt(0).toUpperCase() + rawName.slice(1);
+    const existing = entities.find(e => stripAccents(e.name).toLowerCase() === entityName.toLowerCase());
 
     if (!existing) {
       const newEntity: Entity = {
@@ -211,10 +236,10 @@ export function executeVoiceCommand(
       };
 
       if (addEntityMatch[2]) {
-        const rawAttrs = addEntityMatch[2].split(/,| y /);
+        const rawAttrs = addEntityMatch[2].split(/,| y | e /);
         rawAttrs.forEach((raw, idx) => {
-          const clean = raw.trim().replace(/\s+/g, '_');
-          if (clean && clean.toLowerCase() !== 'id') {
+          const clean = cleanIdentifier(raw).toLowerCase();
+          if (clean && clean !== 'id') {
             newEntity.attributes.push({
               id: `attr_${Date.now()}_${idx}`,
               name: clean,
@@ -225,7 +250,6 @@ export function executeVoiceCommand(
           }
         });
       } else {
-        // Atributo por defecto nombre
         newEntity.attributes.push({
           id: `attr_${Date.now()}_nom`,
           name: 'nombre',
@@ -252,7 +276,7 @@ export function executeVoiceCommand(
   }
 
   // 6. COMANDO: Modelar dominio completo (Veterinaria, Farmacia, Biblioteca, E-commerce)
-  if (text.includes('veterinaria') || text.includes('mascota') || text.includes('animal')) {
+  if (cleanText.includes('veterinaria') || cleanText.includes('mascota') || cleanText.includes('animal')) {
     const res = createVeterinariaDomain();
     return {
       model: { ...model, entities: res.entities, relationships: res.relationships, functionalDependencies: res.functionalDependencies, updatedAt: Date.now() },
@@ -261,7 +285,7 @@ export function executeVoiceCommand(
     };
   }
 
-  if (text.includes('farmacia') || text.includes('medicamento') || text.includes('receta')) {
+  if (cleanText.includes('farmacia') || cleanText.includes('medicamento') || cleanText.includes('receta')) {
     const res = createFarmaciaDomain();
     return {
       model: { ...model, entities: res.entities, relationships: res.relationships, functionalDependencies: res.functionalDependencies, updatedAt: Date.now() },
@@ -270,7 +294,7 @@ export function executeVoiceCommand(
     };
   }
 
-  if (text.includes('tienda') || text.includes('e-commerce') || text.includes('comercio') || text.includes('ventas')) {
+  if (cleanText.includes('tienda') || cleanText.includes('e-commerce') || cleanText.includes('comercio') || cleanText.includes('ventas')) {
     const res = createEcommerceDomain();
     return {
       model: { ...model, entities: res.entities, relationships: res.relationships, functionalDependencies: res.functionalDependencies, updatedAt: Date.now() },
