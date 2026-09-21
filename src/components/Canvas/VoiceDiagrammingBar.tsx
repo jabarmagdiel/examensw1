@@ -1,5 +1,16 @@
 import React, { useState, useEffect } from 'react';
-import { Mic, MicOff, Send, Sparkles, Volume2, ArrowRight, HelpCircle, CheckCircle2 } from 'lucide-react';
+import { 
+  Mic, 
+  MicOff, 
+  Send, 
+  Sparkles, 
+  HelpCircle, 
+  CheckCircle2, 
+  X, 
+  ArrowUpDown, 
+  Minimize2,
+  ChevronDown
+} from 'lucide-react';
 import { DiagramModel } from '../../types/case';
 import { executeVoiceCommand } from '../../services/aiAssistant';
 
@@ -12,6 +23,8 @@ export const VoiceDiagrammingBar: React.FC<VoiceDiagrammingBarProps> = ({
   model,
   onApplyVoiceResult
 }) => {
+  const [isExpanded, setIsExpanded] = useState(false);
+  const [position, setPosition] = useState<'top' | 'bottom'>('top');
   const [isListening, setIsListening] = useState(false);
   const [transcript, setTranscript] = useState('');
   const [lastFeedback, setLastFeedback] = useState<string | null>(null);
@@ -46,6 +59,17 @@ export const VoiceDiagrammingBar: React.FC<VoiceDiagrammingBarProps> = ({
     }
   }, [model]);
 
+  // Tecla Escape para minimizar la barra
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Escape' && isExpanded) {
+        setIsExpanded(false);
+      }
+    };
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [isExpanded]);
+
   const speakResponse = (text: string) => {
     if ('speechSynthesis' in window) {
       window.speechSynthesis.cancel();
@@ -71,7 +95,6 @@ export const VoiceDiagrammingBar: React.FC<VoiceDiagrammingBarProps> = ({
           setIsListening(false);
         }
       } else {
-        // Fallback simulación
         const fallbackCommands = [
           'crear entidad Proveedor con nit y razonSocial',
           'añadir atributo telefono a Cliente',
@@ -96,22 +119,92 @@ export const VoiceDiagrammingBar: React.FC<VoiceDiagrammingBarProps> = ({
     setTranscript('');
   };
 
+  // MODO COLAPSADO: Botón flotante discreto (FAB)
+  if (!isExpanded) {
+    return (
+      <div style={{
+        position: 'absolute',
+        bottom: 24,
+        right: 180,
+        zIndex: 60,
+        pointerEvents: 'auto'
+      }}>
+        <button
+          onClick={() => setIsExpanded(true)}
+          style={{
+            display: 'flex',
+            alignItems: 'center',
+            gap: 8,
+            padding: '8px 16px',
+            borderRadius: 30,
+            background: 'linear-gradient(135deg, rgba(30, 41, 59, 0.95) 0%, rgba(15, 23, 42, 0.95) 100%)',
+            backdropFilter: 'blur(12px)',
+            border: '1.5px solid rgba(99, 102, 241, 0.45)',
+            color: '#fff',
+            boxShadow: '0 8px 25px rgba(0, 0, 0, 0.5), 0 0 15px rgba(99, 102, 241, 0.25)',
+            cursor: 'pointer',
+            transition: 'all 0.2s cubic-bezier(0.16, 1, 0.3, 1)'
+          }}
+          title="Diseñar diagrama con comandos de voz (Clic para abrir barra)"
+          onMouseEnter={e => {
+            e.currentTarget.style.transform = 'translateY(-2px)';
+            e.currentTarget.style.borderColor = '#818cf8';
+          }}
+          onMouseLeave={e => {
+            e.currentTarget.style.transform = 'translateY(0)';
+            e.currentTarget.style.borderColor = 'rgba(99, 102, 241, 0.45)';
+          }}
+        >
+          <div style={{
+            width: 26,
+            height: 26,
+            borderRadius: '50%',
+            background: 'linear-gradient(135deg, #6366f1 0%, #4f46e5 100%)',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            boxShadow: '0 0 10px rgba(99, 102, 241, 0.6)'
+          }}>
+            <Mic size={14} color="#fff" />
+          </div>
+          <span style={{ fontSize: 12, fontWeight: 700, color: '#e0e7ff', letterSpacing: '-0.01em' }}>
+            Diseñar por Voz
+          </span>
+          <span style={{
+            fontSize: 9,
+            background: 'rgba(99, 102, 241, 0.25)',
+            color: '#a5b4fc',
+            padding: '1px 6px',
+            borderRadius: 10,
+            fontWeight: 700
+          }}>
+            IA
+          </span>
+        </button>
+      </div>
+    );
+  }
+
+  // MODO EXPANDIDO: Barra flotante elegante con botón para ocultar y mover
   return (
     <div style={{
       position: 'absolute',
-      top: 14,
+      top: position === 'top' ? 14 : 'auto',
+      bottom: position === 'bottom' ? 24 : 'auto',
       left: '50%',
       transform: 'translateX(-50%)',
-      zIndex: 60,
-      width: '90%',
-      maxWidth: 820,
-      pointerEvents: 'auto'
+      zIndex: 65,
+      width: '92%',
+      maxWidth: 680,
+      pointerEvents: 'auto',
+      animation: 'fadeIn 0.2s ease-out'
     }}>
       <div className="glass-panel" style={{
         padding: '10px 14px',
-        boxShadow: 'var(--shadow-lg), var(--shadow-glow-indigo)',
-        border: '1px solid var(--border-active)',
-        background: 'rgba(10, 15, 29, 0.88)'
+        boxShadow: '0 12px 35px rgba(0, 0, 0, 0.6), 0 0 20px rgba(99, 102, 241, 0.35)',
+        border: '1.5px solid rgba(99, 102, 241, 0.5)',
+        background: 'rgba(10, 15, 29, 0.94)',
+        borderRadius: 16
       }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
           {/* Micrófono interactivo */}
@@ -119,35 +212,41 @@ export const VoiceDiagrammingBar: React.FC<VoiceDiagrammingBarProps> = ({
             onClick={toggleListening}
             title={isListening ? 'Detener micrófono' : 'Hablar comando de graficado'}
             style={{
-              width: 42,
-              height: 42,
+              width: 38,
+              height: 38,
               borderRadius: '50%',
-              background: isListening ? 'var(--accent-rose)' : 'var(--grad-primary)',
+              background: isListening ? '#f43f5e' : 'linear-gradient(135deg, #6366f1 0%, #4f46e5 100%)',
               color: '#fff',
+              border: 'none',
+              cursor: 'pointer',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
               boxShadow: isListening ? '0 0 20px rgba(244, 63, 94, 0.7)' : '0 4px 12px rgba(99, 102, 241, 0.4)',
               animation: isListening ? 'pulseGlow 1s infinite alternate' : 'none',
               flexShrink: 0
             }}
           >
-            {isListening ? <MicOff size={18} /> : <Mic size={18} />}
+            {isListening ? <MicOff size={16} /> : <Mic size={16} />}
           </button>
 
           {/* Campo de Entrada de Voz / Texto */}
           <div style={{ flex: 1, position: 'relative' }}>
             <input
               type="text"
-              placeholder={isListening ? '🎙️ Escuchando... Di: "Crear entidad Proveedor" o "Añadir atributo precio a Producto"' : 'Graficar por voz o escribir comando: ej. "añadir atributo telefono a Cliente"'}
+              autoFocus
+              placeholder={isListening ? '🎙️ Escuchando... Di: "Crear entidad Proveedor" o "Añadir campo precio a Mascota"' : 'Comando de voz o escribir: ej. "crear entidad Factura"'}
               value={transcript}
               onChange={e => setTranscript(e.target.value)}
               onKeyDown={e => e.key === 'Enter' && handleExecute()}
               style={{
                 width: '100%',
-                background: 'rgba(0, 0, 0, 0.4)',
+                background: 'rgba(0, 0, 0, 0.45)',
                 border: '1px solid rgba(255, 255, 255, 0.12)',
-                borderRadius: 24,
-                padding: '10px 42px 10px 16px',
+                borderRadius: 20,
+                padding: '8px 38px 8px 14px',
                 color: '#fff',
-                fontSize: 13,
+                fontSize: 12,
                 outline: 'none'
               }}
             />
@@ -155,33 +254,65 @@ export const VoiceDiagrammingBar: React.FC<VoiceDiagrammingBarProps> = ({
               onClick={() => handleExecute()}
               style={{
                 position: 'absolute',
-                right: 6,
+                right: 5,
                 top: '50%',
                 transform: 'translateY(-50%)',
-                width: 30,
-                height: 30,
+                width: 26,
+                height: 26,
                 borderRadius: '50%',
                 background: 'var(--accent-primary)',
+                border: 'none',
                 color: '#fff',
+                cursor: 'pointer',
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
                 padding: 0
               }}
-              title="Ejecutar comando de graficado"
+              title="Ejecutar comando"
             >
-              <Send size={13} />
+              <Send size={12} />
             </button>
           </div>
 
+          {/* Botón Ayuda */}
           <button
             className="btn-icon"
-            style={{ width: 34, height: 34 }}
+            style={{ width: 30, height: 30 }}
             onClick={() => setShowHelp(!showHelp)}
-            title="Ver ejemplos de comandos de graficado por voz"
+            title="Ver ejemplos de comandos de voz"
           >
-            <HelpCircle size={16} />
+            <HelpCircle size={15} />
+          </button>
+
+          {/* Botón Mover (Arriba / Abajo) */}
+          <button
+            className="btn-icon"
+            style={{ width: 30, height: 30 }}
+            onClick={() => setPosition(position === 'top' ? 'bottom' : 'top')}
+            title={position === 'top' ? 'Mover barra abajo' : 'Mover barra arriba'}
+          >
+            <ArrowUpDown size={14} />
+          </button>
+
+          {/* Botón Minimizar / Ocultar */}
+          <button
+            className="btn-icon"
+            style={{
+              width: 30,
+              height: 30,
+              color: '#ef4444',
+              background: 'rgba(239, 68, 68, 0.15)',
+              borderRadius: 6
+            }}
+            onClick={() => setIsExpanded(false)}
+            title="Minimizar barra a botón flotante (Esc)"
+          >
+            <X size={15} />
           </button>
         </div>
 
-        {/* Feedback de la última acción */}
+        {/* Feedback de la última acción ejecutada */}
         {lastFeedback && (
           <div style={{
             marginTop: 8,
@@ -189,29 +320,35 @@ export const VoiceDiagrammingBar: React.FC<VoiceDiagrammingBarProps> = ({
             color: '#34d399',
             display: 'flex',
             alignItems: 'center',
-            gap: 6,
-            background: 'rgba(16, 185, 129, 0.1)',
+            justifyContent: 'space-between',
+            background: 'rgba(16, 185, 129, 0.12)',
+            border: '1px solid rgba(16, 185, 129, 0.25)',
             padding: '4px 10px',
             borderRadius: 6
           }}>
-            <CheckCircle2 size={13} />
-            <span>{lastFeedback}</span>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+              <CheckCircle2 size={13} />
+              <span>{lastFeedback}</span>
+            </div>
+            <button
+              onClick={() => setLastFeedback(null)}
+              style={{ background: 'transparent', border: 'none', color: '#34d399', cursor: 'pointer', padding: 0 }}
+            >
+              <X size={12} />
+            </button>
           </div>
         )}
 
         {/* Comandos rápidos recomendados */}
-        <div style={{ display: 'flex', gap: 6, marginTop: 8, overflowX: 'auto', paddingBottom: 2 }}>
+        <div style={{ display: 'flex', gap: 5, marginTop: 8, overflowX: 'auto', paddingBottom: 2 }}>
           <span style={{ fontSize: 10, color: 'var(--text-muted)', display: 'flex', alignItems: 'center', flexShrink: 0 }}>
-            Ejemplos de Voz:
+            Ejemplos:
           </span>
           {[
             'crear entidad Proveedor con nit y direccion',
             'añadir atributo telefono a Cliente',
             'añadir atributo precio de tipo decimal a Mascota',
-            'relacionar Cliente con Mascota de uno a muchos',
-            'hacer que dni sea clave primaria en Cliente',
-            'eliminar entidad HistorialClinico',
-            'modelar Farmacia'
+            'relacionar Cliente con Mascota de uno a muchos'
           ].map(example => (
             <button
               key={example}
@@ -221,12 +358,13 @@ export const VoiceDiagrammingBar: React.FC<VoiceDiagrammingBarProps> = ({
               }}
               style={{
                 fontSize: 10,
-                padding: '3px 8px',
-                borderRadius: 12,
+                padding: '2px 8px',
+                borderRadius: 10,
                 background: 'rgba(255, 255, 255, 0.05)',
                 color: 'var(--text-secondary)',
                 border: '1px solid var(--border-subtle)',
-                whiteSpace: 'nowrap'
+                whiteSpace: 'nowrap',
+                cursor: 'pointer'
               }}
             >
               &ldquo;{example}&rdquo;
@@ -234,12 +372,12 @@ export const VoiceDiagrammingBar: React.FC<VoiceDiagrammingBarProps> = ({
           ))}
         </div>
 
-        {/* Guía desplegable de ayuda de comandos */}
+        {/* Guía desplegable de ayuda */}
         {showHelp && (
           <div style={{
-            marginTop: 10,
+            marginTop: 8,
             padding: 10,
-            background: 'var(--bg-surface)',
+            background: 'rgba(15, 23, 42, 0.95)',
             borderRadius: 8,
             border: '1px solid var(--border-subtle)',
             fontSize: 11,
@@ -247,14 +385,12 @@ export const VoiceDiagrammingBar: React.FC<VoiceDiagrammingBarProps> = ({
             color: 'var(--text-secondary)'
           }}>
             <div style={{ fontWeight: 600, color: '#fff', marginBottom: 4 }}>
-              🎙️ Sintaxis de Comandos de Voz Admitidos:
+              🎙️ Sintaxis de Comandos de Voz:
             </div>
             <div>• <strong>Crear clase/entidad:</strong> &ldquo;Crear entidad Proveedor&rdquo; o &ldquo;Crear clase Factura con total y fecha&rdquo;</div>
-            <div>• <strong>Añadir atributo con tipo:</strong> &ldquo;Añadir atributo nombre de tipo texto a Proveedor&rdquo; o &ldquo;Añadir campo precio decimal a Producto&rdquo;</div>
-            <div>• <strong>Establecer Clave Primaria:</strong> &ldquo;Hacer que dni sea clave primaria en Cliente&rdquo;</div>
+            <div>• <strong>Añadir atributo con tipo:</strong> &ldquo;Añadir atributo telefono a Cliente&rdquo; o &ldquo;Añadir campo precio decimal a Producto&rdquo;</div>
             <div>• <strong>Graficar relación:</strong> &ldquo;Crear relación de uno a muchos entre Cliente y Mascota&rdquo;</div>
             <div>• <strong>Eliminar elemento:</strong> &ldquo;Eliminar entidad HistorialClinico&rdquo;</div>
-            <div>• <strong>Diseñar dominio completo:</strong> &ldquo;Modelar sistema de Farmacia&rdquo; o &ldquo;Diseñar Veterinaria&rdquo;</div>
           </div>
         )}
       </div>

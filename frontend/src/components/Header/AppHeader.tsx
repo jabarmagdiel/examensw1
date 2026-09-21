@@ -152,130 +152,37 @@ export const AppHeader: React.FC<AppHeaderProps> = ({
             </div>
           </div>
         ) : (
-          <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-            <div style={{ display: 'flex', background: 'rgba(0, 0, 0, 0.25)', padding: 3, borderRadius: 8, gap: 4 }}>
-              <button
-                onClick={() => onSelectModule('dashboard')}
-                style={{
-                  display: 'flex',
-                  alignItems: 'center',
-                  gap: 5,
-                  fontSize: 11,
-                  padding: '4px 10px',
-                  borderRadius: 6,
-                  background: activeModule === 'dashboard' ? 'rgba(99, 102, 241, 0.25)' : 'transparent',
-                  color: activeModule === 'dashboard' ? '#818cf8' : 'var(--text-secondary)',
-                  border: 'none',
-                  cursor: 'pointer',
-                  fontWeight: activeModule === 'dashboard' ? 700 : 500
-                }}
-              >
-                <LayoutDashboard size={13} /> Dashboard
-              </button>
-              <button
-                onClick={() => onSelectModule('projects')}
-                style={{
-                  display: 'flex',
-                  alignItems: 'center',
-                  gap: 5,
-                  fontSize: 11,
-                  padding: '4px 10px',
-                  borderRadius: 6,
-                  background: activeModule === 'projects' ? 'rgba(56, 189, 248, 0.2)' : 'transparent',
-                  color: activeModule === 'projects' ? '#38bdf8' : 'var(--text-secondary)',
-                  border: 'none',
-                  cursor: 'pointer'
-                }}
-              >
-                <FolderGit2 size={13} /> Proyectos
-              </button>
-              <button
-                onClick={() => onSelectModule('users')}
-                style={{
-                  display: 'flex',
-                  alignItems: 'center',
-                  gap: 5,
-                  fontSize: 11,
-                  padding: '4px 10px',
-                  borderRadius: 6,
-                  background: activeModule === 'users' ? 'rgba(245, 158, 11, 0.2)' : 'transparent',
-                  color: activeModule === 'users' ? '#f59e0b' : 'var(--text-secondary)',
-                  border: 'none',
-                  cursor: 'pointer'
-                }}
-              >
-                <Users size={13} /> Usuarios
-              </button>
-              <button
-                onClick={() => onSelectModule('reports')}
-                style={{
-                  display: 'flex',
-                  alignItems: 'center',
-                  gap: 5,
-                  fontSize: 11,
-                  padding: '4px 10px',
-                  borderRadius: 6,
-                  background: activeModule === 'reports' ? 'rgba(16, 185, 129, 0.2)' : 'transparent',
-                  color: activeModule === 'reports' ? '#34d399' : 'var(--text-secondary)',
-                  border: 'none',
-                  cursor: 'pointer'
-                }}
-              >
-                <BarChart3 size={13} /> Reportes & Calidad
-              </button>
-              <button
-                onClick={() => onSelectModule('mapping')}
-                style={{
-                  display: 'flex',
-                  alignItems: 'center',
-                  gap: 5,
-                  fontSize: 11,
-                  padding: '4px 10px',
-                  borderRadius: 6,
-                  background: activeModule === 'mapping' ? 'rgba(2, 132, 199, 0.25)' : 'transparent',
-                  color: activeModule === 'mapping' ? '#38bdf8' : 'var(--text-secondary)',
-                  border: 'none',
-                  cursor: 'pointer'
-                }}
-              >
-                <Database size={13} /> Mapeo & Excel
-              </button>
-              <button
-                onClick={() => onSelectModule('mobile')}
-                style={{
-                  display: 'flex',
-                  alignItems: 'center',
-                  gap: 5,
-                  fontSize: 11,
-                  padding: '4px 10px',
-                  borderRadius: 6,
-                  background: activeModule === 'mobile' ? 'rgba(16, 185, 129, 0.25)' : 'transparent',
-                  color: activeModule === 'mobile' ? '#34d399' : 'var(--text-secondary)',
-                  border: 'none',
-                  cursor: 'pointer',
-                  fontWeight: activeModule === 'mobile' ? 700 : 500
-                }}
-              >
-                <Smartphone size={13} /> App Móvil APK
-              </button>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+            <div style={{
+              display: 'flex',
+              alignItems: 'center',
+              gap: 8,
+              background: 'rgba(0, 0, 0, 0.3)',
+              padding: '6px 14px',
+              borderRadius: 8,
+              border: '1px solid var(--border-subtle)'
+            }}>
+              <span style={{ fontSize: 11, color: 'var(--text-muted)' }}>Proyecto Activo:</span>
+              <span style={{ fontSize: 12, fontWeight: 700, color: '#38bdf8' }}>{activeProjectName}</span>
             </div>
 
             <button
               className="btn-primary"
               style={{
                 fontSize: 11,
-                padding: '5px 12px',
+                padding: '6px 14px',
                 background: 'linear-gradient(135deg, #6366f1 0%, #4f46e5 100%)',
                 color: '#fff',
                 display: 'flex',
                 alignItems: 'center',
-                gap: 6
+                gap: 6,
+                boxShadow: 'var(--shadow-glow-indigo)'
               }}
               onClick={() => onSelectModule('canvas')}
               title={`Abrir el Taller de Diseño para ${activeProjectName}`}
             >
               <LayoutDashboard size={14} />
-              <span>Taller de Diseño: {activeProjectName}</span>
+              <span>Abrir Taller de Diseño</span>
             </button>
           </div>
         )}

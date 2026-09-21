@@ -106,16 +106,6 @@ export const ModuleSidebar: React.FC<ModuleSidebarProps> = ({
     }
   ];
 
-  // Herramientas Técnicas de Ingeniería de Software (Apartadas en el Estudio de Diseño)
-  const engineeringTools = [
-    { label: 'Normalización 1FN-BCNF', icon: CheckCircle2, color: '#34d399', action: onOpenNormalizer },
-    { label: 'Enterprise Architect XML', icon: FolderSync, color: '#06b6d4', action: onOpenArchitect },
-    { label: 'Gestor BD & Supabase CRUD', icon: Database, color: '#38bdf8', action: () => onOpenDatabaseManager && onOpenDatabaseManager() },
-    { label: 'Generador Spring Boot', icon: Download, color: '#a855f7', action: onOpenSpringBoot },
-    { label: 'Cliente Pruebas CRUD', icon: Play, color: '#f59e0b', action: onOpenTestClient },
-    { label: 'Colaboración en Vivo', icon: Sparkles, color: '#f43f5e', action: onOpenCollab }
-  ];
-
   return (
     <aside className="glass-panel" style={{
       width: isCollapsed ? 64 : 260,
@@ -277,41 +267,6 @@ export const ModuleSidebar: React.FC<ModuleSidebarProps> = ({
                 </div>
               )}
             </button>
-
-            {/* Sub-herramientas técnicas de diseño (visibles cuando está expandido) */}
-            {!isCollapsed && (
-              <div style={{ marginTop: 8, display: 'flex', flexDirection: 'column', gap: 2, paddingLeft: 4 }}>
-                <div style={{ fontSize: 9, color: 'var(--text-muted)', marginBottom: 2 }}>Herramientas del Proyecto:</div>
-                {engineeringTools.map(tool => {
-                  const ToolIcon = tool.icon;
-                  return (
-                    <button
-                      key={tool.label}
-                      onClick={tool.action}
-                      style={{
-                        display: 'flex',
-                        alignItems: 'center',
-                        gap: 8,
-                        padding: '5px 8px',
-                        borderRadius: 6,
-                        background: 'transparent',
-                        border: 'none',
-                        color: 'var(--text-secondary)',
-                        fontSize: 11,
-                        cursor: 'pointer',
-                        textAlign: 'left',
-                        transition: 'background 0.1s ease'
-                      }}
-                      onMouseEnter={e => e.currentTarget.style.background = 'rgba(255,255,255,0.05)'}
-                      onMouseLeave={e => e.currentTarget.style.background = 'transparent'}
-                    >
-                      <ToolIcon size={13} color={tool.color} />
-                      <span style={{ whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{tool.label}</span>
-                    </button>
-                  );
-                })}
-              </div>
-            )}
           </div>
         </div>
 
