@@ -1,4 +1,4 @@
-import { Attribute, Cardinality, DataType, DiagramModel, Entity, FunctionalDependency, Relationship, VoiceCommandQueueItem } from '../types/case';
+import { Attribute, Cardinality, DataType, DiagramModel, Entity, FunctionalDependency, Relationship, RelationshipType, VoiceCommandQueueItem } from '../types/case';
 
 // Almacenamiento local para la cola offline del móvil
 const OFFLINE_QUEUE_KEY = 'caseai_mobile_offline_voice_queue';
@@ -935,6 +935,7 @@ Responde ÚNICAMENTE con un JSON válido con esta estructura exacta (sin texto a
       "sourceName": "NombreClaseOrigen",
       "targetName": "NombreClaseDestino",
       "cardinality": "1:1|1:N|N:M",
+      "type": "association|aggregation|composition|inheritance|dependency",
       "name": "nombreRelacion"
     }
   ],
@@ -945,7 +946,8 @@ Reglas:
 - Si un atributo parece ser id/clave primaria, pon isPrimaryKey: true y type: BIGINT
 - Usa tableName en snake_case (ej: "orden_detalle" para "OrdenDetalle")
 - Si no hay relaciones visibles, pon relationships: []
-- Si no puedes reconocer ninguna clase, devuelve entities: [] con summary explicando el problema`;
+- En type de relationships reconoce rombos (aggregation/composition), triángulos (inheritance) o líneas simples (association)
+- Devuelve EXCLUSIVAMENTE el objeto JSON sin texto antes ni después`;
 
   const MODELS_TO_TRY = ['gemini-3.5-flash', 'gemini-3.6-flash', 'gemini-flash-latest'];
   let lastError = '';
@@ -966,9 +968,10 @@ Reglas:
               ]
             }],
             generationConfig: {
+              responseMimeType: 'application/json',
               temperature: 0.1,
               topP: 0.8,
-              maxOutputTokens: 2048,
+              maxOutputTokens: 8192,
             }
           })
         }
@@ -991,11 +994,17 @@ Reglas:
   }
   const rawText: string = geminiData?.candidates?.[0]?.content?.parts?.[0]?.text ?? '';
 
-  // Limpiar posibles markdown code fences
-  const jsonText = rawText
+  // Limpiar posibles markdown code fences y extraer bloque {...}
+  let jsonText = rawText
     .replace(/```json\s*/gi, '')
     .replace(/```\s*/g, '')
     .trim();
+
+  const firstBrace = jsonText.indexOf('{');
+  const lastBrace = jsonText.lastIndexOf('}');
+  if (firstBrace !== -1 && lastBrace !== -1 && lastBrace > firstBrace) {
+    jsonText = jsonText.substring(firstBrace, lastBrace + 1);
+  }
 
   let parsed: {
     entities: Array<{
@@ -1003,7 +1012,7 @@ Reglas:
       tableName: string;
       attributes: Array<{ name: string; type: string; isPrimaryKey: boolean; isNullable: boolean }>;
     }>;
-    relationships: Array<{ sourceName: string; targetName: string; cardinality: string; name: string }>;
+    relationships: Array<{ sourceName: string; targetName: string; cardinality: string; type?: string; name: string }>;
     summary: string;
   };
 
@@ -1048,6 +1057,7 @@ Reglas:
       sourceEntityId: entityMap.get(r.sourceName)!,
       targetEntityId: entityMap.get(r.targetName)!,
       cardinality: (r.cardinality as Cardinality) || '1:N',
+      type: (r.type as RelationshipType) || 'association',
     }));
 
   return {
