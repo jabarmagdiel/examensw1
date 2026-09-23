@@ -947,33 +947,48 @@ Reglas:
 - Si no hay relaciones visibles, pon relationships: []
 - Si no puedes reconocer ninguna clase, devuelve entities: [] con summary explicando el problema`;
 
-  const response = await fetch(
-    `https://generativelanguage.googleapis.com/v1beta/models/gemini-3.6-flash:generateContent?key=${apiKey}`,
-    {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        contents: [{
-          parts: [
-            { text: prompt },
-            { inline_data: { mime_type: mimeType, data: base64Image } }
-          ]
-        }],
-        generationConfig: {
-          temperature: 0.1,
-          topP: 0.8,
-          maxOutputTokens: 2048,
-        }
-      })
-    }
-  );
+  const MODELS_TO_TRY = ['gemini-3.5-flash', 'gemini-3.6-flash', 'gemini-flash-latest'];
+  let lastError = '';
+  let geminiData: any = null;
 
-  if (!response.ok) {
-    const errBody = await response.text();
-    throw new Error(`Gemini API error ${response.status}: ${errBody}`);
+  for (const model of MODELS_TO_TRY) {
+    try {
+      const response = await fetch(
+        `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${apiKey}`,
+        {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            contents: [{
+              parts: [
+                { text: prompt },
+                { inline_data: { mime_type: mimeType, data: base64Image } }
+              ]
+            }],
+            generationConfig: {
+              temperature: 0.1,
+              topP: 0.8,
+              maxOutputTokens: 2048,
+            }
+          })
+        }
+      );
+
+      if (response.ok) {
+        geminiData = await response.json();
+        break;
+      } else {
+        const errBody = await response.text();
+        lastError = `Gemini API error ${response.status} (${model}): ${errBody}`;
+      }
+    } catch (err: any) {
+      lastError = `Error de conexión con ${model}: ${err?.message || err}`;
+    }
   }
 
-  const geminiData = await response.json();
+  if (!geminiData) {
+    throw new Error(lastError || 'No se pudo obtener respuesta de ningún modelo de Gemini.');
+  }
   const rawText: string = geminiData?.candidates?.[0]?.content?.parts?.[0]?.text ?? '';
 
   // Limpiar posibles markdown code fences
