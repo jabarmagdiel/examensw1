@@ -45,12 +45,21 @@ export interface Entity {
 
 export type Cardinality = '1:1' | '1:N' | 'N:M';
 
+export type RelationshipType = 
+  | 'association' 
+  | 'aggregation' 
+  | 'composition' 
+  | 'inheritance' 
+  | 'dependency' 
+  | 'realization';
+
 export interface Relationship {
   id: string;
   name: string;
   sourceEntityId: string;
   targetEntityId: string;
   cardinality: Cardinality;
+  type?: RelationshipType;
   sourceRole?: string;
   targetRole?: string;
   isIdentifying?: boolean;

@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import { X, Link2, Key, Check, Trash2, ArrowRight, HelpCircle, Layers } from 'lucide-react';
-import { Cardinality, Entity, Relationship } from '../../types/case';
+import { Cardinality, Entity, Relationship, RelationshipType } from '../../types/case';
 
 interface RelationshipModalProps {
   isOpen: boolean;
@@ -8,11 +8,13 @@ interface RelationshipModalProps {
   sourceEntity: Entity | null;
   targetEntity: Entity | null;
   existingRelationship?: Relationship | null;
+  initialType?: RelationshipType;
   onSaveRelationship: (relData: {
     id?: string;
     sourceEntityId: string;
     targetEntityId: string;
     cardinality: Cardinality;
+    type?: RelationshipType;
     name: string;
     foreignKeyName: string;
     createForeignKeyAttribute: boolean;
@@ -26,22 +28,33 @@ export const RelationshipModal: React.FC<RelationshipModalProps> = ({
   sourceEntity,
   targetEntity,
   existingRelationship,
+  initialType,
   onSaveRelationship,
   onDeleteRelationship
 }) => {
   if (!isOpen || !sourceEntity || !targetEntity) return null;
 
+  const [relType, setRelType] = useState<RelationshipType>(
+    existingRelationship?.type || initialType || 'association'
+  );
   const [cardinality, setCardinality] = useState<Cardinality>(
-    existingRelationship?.cardinality || '1:N'
+    existingRelationship?.cardinality || (initialType === 'inheritance' ? '1:1' : '1:N')
   );
   const [relName, setRelName] = useState(
-    existingRelationship?.name || 'posee'
+    existingRelationship?.name || (
+      initialType === 'inheritance' ? 'es un(a)' :
+      initialType === 'composition' ? 'compone' :
+      initialType === 'aggregation' ? 'agrega' :
+      initialType === 'dependency' ? 'depende de' : 'posee'
+    )
   );
   const defaultFkName = `${sourceEntity.name.toLowerCase()}_id`;
   const [foreignKeyName, setForeignKeyName] = useState(
     existingRelationship?.foreignKeyAttributeName || defaultFkName
   );
-  const [createForeignKeyAttribute, setCreateForeignKeyAttribute] = useState(true);
+  const [createForeignKeyAttribute, setCreateForeignKeyAttribute] = useState(
+    initialType !== 'inheritance' && initialType !== 'dependency'
+  );
 
   const handleSave = (e: React.FormEvent) => {
     e.preventDefault();
@@ -50,6 +63,7 @@ export const RelationshipModal: React.FC<RelationshipModalProps> = ({
       sourceEntityId: sourceEntity.id,
       targetEntityId: targetEntity.id,
       cardinality,
+      type: relType,
       name: relName.trim() || 'relaciona',
       foreignKeyName: foreignKeyName.trim() || defaultFkName,
       createForeignKeyAttribute
@@ -147,6 +161,14 @@ export const RelationshipModal: React.FC<RelationshipModalProps> = ({
             <span className="badge" style={{ background: 'var(--grad-primary)', color: '#fff', fontSize: 11, padding: '2px 8px' }}>
               {cardinality}
             </span>
+            <div style={{ fontSize: 12, color: '#818cf8', fontWeight: 800, display: 'flex', alignItems: 'center', gap: 4 }}>
+              {relType === 'composition' && '◆ Composición'}
+              {relType === 'aggregation' && '◇ Agregación'}
+              {relType === 'inheritance' && '▷ Herencia'}
+              {relType === 'dependency' && '⇢ Dependencia'}
+              {relType === 'realization' && '⇸ Realización'}
+              {relType === 'association' && '⎯ Asociación'}
+            </div>
             <div style={{ fontSize: 11, color: 'var(--text-accent)', fontWeight: 600 }}>
               &laquo;{relName || 'enlace'}&raquo;
             </div>
@@ -171,10 +193,66 @@ export const RelationshipModal: React.FC<RelationshipModalProps> = ({
         </div>
 
         <form onSubmit={handleSave} style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
+          {/* Selector de Tipo de Unión UML 2.5+ */}
+          <div>
+            <label style={{ fontSize: 12, fontWeight: 700, color: '#fff', display: 'flex', alignItems: 'center', gap: 6, marginBottom: 8 }}>
+              <span>📐 Tipo de Conector / Unión UML 2.5+:</span>
+              <span style={{ fontSize: 10, color: '#818cf8', fontWeight: 'normal' }}>(Estándar Enterprise Architect)</span>
+            </label>
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 8 }}>
+              {[
+                { id: 'association', symbol: '⎯', label: 'Asociación', desc: 'Enlace simple con multiplicidad' },
+                { id: 'aggregation', symbol: '◇', label: 'Agregación', desc: 'Rombo hueco: Todo / Parte independiente' },
+                { id: 'composition', symbol: '◆', label: 'Composición', desc: 'Rombo lleno: Todo / Parte dependiente' },
+                { id: 'inheritance', symbol: '▷', label: 'Herencia / IS-A', desc: 'Triángulo hueco: Generalización' },
+                { id: 'dependency', symbol: '⇢', label: 'Dependencia', desc: 'Línea discontinua con flecha' },
+                { id: 'realization', symbol: '⇸', label: 'Realización', desc: 'Implementación de contrato o interfaz' }
+              ].map(opt => (
+                <button
+                  key={opt.id}
+                  type="button"
+                  onClick={() => {
+                    setRelType(opt.id as RelationshipType);
+                    if (opt.id === 'inheritance') {
+                      setRelName('es un(a)');
+                      setCardinality('1:1');
+                      setCreateForeignKeyAttribute(false);
+                    } else if (opt.id === 'composition') {
+                      setRelName('compone');
+                      setCreateForeignKeyAttribute(true);
+                    } else if (opt.id === 'aggregation') {
+                      setRelName('agrega');
+                      setCreateForeignKeyAttribute(true);
+                    } else if (opt.id === 'dependency') {
+                      setRelName('usa');
+                      setCreateForeignKeyAttribute(false);
+                    }
+                  }}
+                  style={{
+                    padding: '8px 10px',
+                    borderRadius: 8,
+                    background: relType === opt.id ? 'rgba(99, 102, 241, 0.25)' : 'var(--bg-surface)',
+                    border: `1.5px solid ${relType === opt.id ? '#818cf8' : 'var(--border-subtle)'}`,
+                    color: relType === opt.id ? '#fff' : 'var(--text-secondary)',
+                    textAlign: 'left',
+                    cursor: 'pointer',
+                    transition: 'all 0.15s ease'
+                  }}
+                >
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 2 }}>
+                    <span style={{ fontSize: 16, color: relType === opt.id ? '#38bdf8' : '#818cf8', fontWeight: 900 }}>{opt.symbol}</span>
+                    <span style={{ fontSize: 12, fontWeight: 700 }}>{opt.label}</span>
+                  </div>
+                  <div style={{ fontSize: 9, opacity: 0.8, lineHeight: 1.2 }}>{opt.desc}</div>
+                </button>
+              ))}
+            </div>
+          </div>
+
           {/* Selector de Cardinalidad */}
           <div>
             <label style={{ fontSize: 12, fontWeight: 600, color: 'var(--text-secondary)', display: 'block', marginBottom: 6 }}>
-              Cardinalidad de la Relación:
+              Multiplicidad / Cardinalidad:
             </label>
             <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 8 }}>
               {[

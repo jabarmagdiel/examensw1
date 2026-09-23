@@ -1,6 +1,6 @@
 import React, { useRef, useState } from 'react';
 import { EntityNode } from './EntityNode';
-import { DiagramModel, Entity, Relationship, UserPresence } from '../../types/case';
+import { DiagramModel, Entity, Relationship, RelationshipType, UserPresence } from '../../types/case';
 import { Plus, ZoomIn, ZoomOut, RotateCcw, MousePointer, X } from 'lucide-react';
 import { VoiceDiagrammingBar } from './VoiceDiagrammingBar';
 import { RelationshipModal } from './RelationshipModal';
@@ -22,6 +22,7 @@ interface DiagramCanvasProps {
     sourceEntityId: string;
     targetEntityId: string;
     cardinality: any;
+    type?: RelationshipType;
     name: string;
     foreignKeyName: string;
     createForeignKeyAttribute: boolean;
@@ -50,6 +51,17 @@ export const DiagramCanvas: React.FC<DiagramCanvasProps> = ({
   const [pan, setPan] = useState({ x: 0, y: 0 });
   const [isPanning, setIsPanning] = useState(false);
   const panStartRef = useRef({ x: 0, y: 0 });
+
+  // Herramientas de Modelado Manual UML
+  type CanvasTool = 'select' | 'class' | 'association' | 'aggregation' | 'composition' | 'inheritance' | 'dependency' | 'realization';
+  const [activeTool, setActiveTool] = useState<CanvasTool>('select');
+  const [pendingConnectorType, setPendingConnectorType] = useState<RelationshipType | null>(null);
+
+  const handleSelectConnectorTool = (type: RelationshipType) => {
+    setActiveTool(type as CanvasTool);
+    setPendingConnectorType(type);
+    setConnectingSourceId(null);
+  };
 
   // Estados del Modal de Relación
   const [isRelationshipModalOpen, setIsRelationshipModalOpen] = useState(false);
@@ -91,7 +103,6 @@ export const DiagramCanvas: React.FC<DiagramCanvasProps> = ({
     if (!connectingSourceId) {
       setConnectingSourceId(entityId);
     } else if (connectingSourceId !== entityId) {
-      // Abrir modal de configuración de relación
       const src = model.entities.find(e => e.id === connectingSourceId) || null;
       const tgt = model.entities.find(e => e.id === entityId) || null;
       setRelSourceEntity(src);
@@ -99,12 +110,32 @@ export const DiagramCanvas: React.FC<DiagramCanvasProps> = ({
       setEditingRel(null);
       setIsRelationshipModalOpen(true);
       setConnectingSourceId(null);
+      setActiveTool('select');
     } else {
       setConnectingSourceId(null);
+      setActiveTool('select');
+      setPendingConnectorType(null);
     }
   };
 
   const handleEntityClick = (entityId: string) => {
+    // Si hay una herramienta de unión activa seleccionada en la barra
+    if (activeTool !== 'select' && pendingConnectorType) {
+      if (!connectingSourceId) {
+        setConnectingSourceId(entityId);
+      } else if (connectingSourceId !== entityId) {
+        const src = model.entities.find(e => e.id === connectingSourceId) || null;
+        const tgt = model.entities.find(e => e.id === entityId) || null;
+        setRelSourceEntity(src);
+        setRelTargetEntity(tgt);
+        setEditingRel(null);
+        setIsRelationshipModalOpen(true);
+        setConnectingSourceId(null);
+        setActiveTool('select');
+      }
+      return;
+    }
+
     if (connectingSourceId && connectingSourceId !== entityId) {
       const src = model.entities.find(e => e.id === connectingSourceId) || null;
       const tgt = model.entities.find(e => e.id === entityId) || null;
@@ -113,6 +144,7 @@ export const DiagramCanvas: React.FC<DiagramCanvasProps> = ({
       setEditingRel(null);
       setIsRelationshipModalOpen(true);
       setConnectingSourceId(null);
+      setActiveTool('select');
     } else {
       onSelectEntity(entityId);
     }
@@ -195,6 +227,193 @@ export const DiagramCanvas: React.FC<DiagramCanvasProps> = ({
         </div>
       )}
 
+      {/* Barra de Herramientas de Modelado Manual UML 2.5+ */}
+      <div style={{
+        position: 'absolute',
+        top: 14,
+        left: '50%',
+        transform: 'translateX(-50%)',
+        zIndex: 50,
+        display: 'flex',
+        alignItems: 'center',
+        gap: 5,
+        background: 'rgba(15, 23, 42, 0.92)',
+        backdropFilter: 'blur(16px)',
+        padding: '5px 10px',
+        borderRadius: 14,
+        border: '1px solid rgba(255, 255, 255, 0.12)',
+        boxShadow: '0 8px 32px rgba(0, 0, 0, 0.6)'
+      }}>
+        {/* Puntero de Selección */}
+        <button
+          type="button"
+          onClick={() => { setActiveTool('select'); setPendingConnectorType(null); setConnectingSourceId(null); }}
+          title="Modo Selección / Puntero"
+          style={{
+            display: 'flex',
+            alignItems: 'center',
+            gap: 6,
+            padding: '6px 10px',
+            borderRadius: 8,
+            border: activeTool === 'select' ? '1px solid #818cf8' : '1px solid transparent',
+            background: activeTool === 'select' ? 'rgba(99, 102, 241, 0.3)' : 'transparent',
+            color: activeTool === 'select' ? '#fff' : 'var(--text-secondary)',
+            fontSize: 12,
+            fontWeight: 600,
+            cursor: 'pointer'
+          }}
+        >
+          <MousePointer size={14} />
+          <span>Seleccionar</span>
+        </button>
+
+        <div style={{ width: 1, height: 20, background: 'rgba(255,255,255,0.12)', margin: '0 2px' }} />
+
+        {/* Añadir Clase */}
+        <button
+          type="button"
+          onClick={onAddEntity}
+          title="Agregar Nueva Clase / Entidad UML"
+          style={{
+            display: 'flex',
+            alignItems: 'center',
+            gap: 6,
+            padding: '6px 10px',
+            borderRadius: 8,
+            border: '1px solid rgba(16, 185, 129, 0.4)',
+            background: 'rgba(16, 185, 129, 0.15)',
+            color: '#34d399',
+            fontSize: 12,
+            fontWeight: 700,
+            cursor: 'pointer'
+          }}
+        >
+          <Plus size={14} />
+          <span>+ Clase</span>
+        </button>
+
+        <div style={{ width: 1, height: 20, background: 'rgba(255,255,255,0.12)', margin: '0 2px' }} />
+
+        <span style={{ fontSize: 10, color: '#94a3b8', textTransform: 'uppercase', padding: '0 4px', fontWeight: 700, letterSpacing: '0.05em' }}>
+          Uniones UML:
+        </span>
+
+        {/* Asociación */}
+        <button
+          type="button"
+          onClick={() => handleSelectConnectorTool('association')}
+          title="Asociación Simple (Línea Continua)"
+          style={{
+            display: 'flex',
+            alignItems: 'center',
+            gap: 5,
+            padding: '6px 9px',
+            borderRadius: 8,
+            border: activeTool === 'association' ? '1px solid #6366f1' : '1px solid transparent',
+            background: activeTool === 'association' ? 'rgba(99, 102, 241, 0.3)' : 'transparent',
+            color: activeTool === 'association' ? '#fff' : 'var(--text-secondary)',
+            fontSize: 12,
+            fontWeight: 600,
+            cursor: 'pointer'
+          }}
+        >
+          <span style={{ fontSize: 14, fontWeight: 900 }}>⎯</span>
+          <span>Asociación</span>
+        </button>
+
+        {/* Agregación ◇ */}
+        <button
+          type="button"
+          onClick={() => handleSelectConnectorTool('aggregation')}
+          title="Agregación (Rombo Blanco ◇: Todo/Parte Débil)"
+          style={{
+            display: 'flex',
+            alignItems: 'center',
+            gap: 5,
+            padding: '6px 9px',
+            borderRadius: 8,
+            border: activeTool === 'aggregation' ? '1px solid #38bdf8' : '1px solid transparent',
+            background: activeTool === 'aggregation' ? 'rgba(56, 189, 248, 0.2)' : 'transparent',
+            color: activeTool === 'aggregation' ? '#38bdf8' : 'var(--text-secondary)',
+            fontSize: 12,
+            fontWeight: 600,
+            cursor: 'pointer'
+          }}
+        >
+          <span style={{ fontSize: 15, fontWeight: 900, color: '#38bdf8' }}>◇</span>
+          <span>Agregación</span>
+        </button>
+
+        {/* Composición ◆ */}
+        <button
+          type="button"
+          onClick={() => handleSelectConnectorTool('composition')}
+          title="Composición (Rombo Lleno ◆: Todo/Parte Fuerte)"
+          style={{
+            display: 'flex',
+            alignItems: 'center',
+            gap: 5,
+            padding: '6px 9px',
+            borderRadius: 8,
+            border: activeTool === 'composition' ? '1px solid #818cf8' : '1px solid transparent',
+            background: activeTool === 'composition' ? 'rgba(129, 140, 248, 0.25)' : 'transparent',
+            color: activeTool === 'composition' ? '#a5b4fc' : 'var(--text-secondary)',
+            fontSize: 12,
+            fontWeight: 600,
+            cursor: 'pointer'
+          }}
+        >
+          <span style={{ fontSize: 15, fontWeight: 900, color: '#818cf8' }}>◆</span>
+          <span>Composición</span>
+        </button>
+
+        {/* Herencia ▷ */}
+        <button
+          type="button"
+          onClick={() => handleSelectConnectorTool('inheritance')}
+          title="Herencia / Generalización (Triángulo ▷: Subclase a Superclase)"
+          style={{
+            display: 'flex',
+            alignItems: 'center',
+            gap: 5,
+            padding: '6px 9px',
+            borderRadius: 8,
+            border: activeTool === 'inheritance' ? '1px solid #fbbf24' : '1px solid transparent',
+            background: activeTool === 'inheritance' ? 'rgba(251, 191, 36, 0.2)' : 'transparent',
+            color: activeTool === 'inheritance' ? '#fbbf24' : 'var(--text-secondary)',
+            fontSize: 12,
+            fontWeight: 600,
+            cursor: 'pointer'
+          }}
+        >
+          <span style={{ fontSize: 15, fontWeight: 900, color: '#fbbf24' }}>▷</span>
+          <span>Herencia</span>
+        </button>
+
+        {/* Dependencia ⇢ */}
+        <button
+          type="button"
+          onClick={() => handleSelectConnectorTool('dependency')}
+          title="Dependencia (Línea Punteada ⇢)"
+          style={{
+            display: 'flex',
+            alignItems: 'center',
+            gap: 5,
+            padding: '6px 9px',
+            borderRadius: 8,
+            border: activeTool === 'dependency' ? '1px solid #f43f5e' : '1px solid transparent',
+            background: activeTool === 'dependency' ? 'rgba(244, 63, 94, 0.2)' : 'transparent',
+            color: activeTool === 'dependency' ? '#f43f5e' : 'var(--text-secondary)',
+            fontSize: 12,
+            fontWeight: 600,
+            cursor: 'pointer'
+          }}
+        >
+          <span style={{ fontSize: 15, fontWeight: 900, color: '#f43f5e' }}>⇢</span>
+          <span>Dependencia</span>
+        </button>
+      </div>
+
       {/* Barra Flotante de Graficado por Voz en Tiempo Real */}
       <VoiceDiagrammingBar
         model={model}
@@ -205,32 +424,38 @@ export const DiagramCanvas: React.FC<DiagramCanvasProps> = ({
       {connectingSourceEntity && (
         <div style={{
           position: 'absolute',
-          top: 90,
+          top: 70,
           left: '50%',
           transform: 'translateX(-50%)',
           zIndex: 55,
-          background: 'rgba(16, 185, 129, 0.95)',
-          backdropFilter: 'blur(8px)',
-          color: '#064e3b',
-          padding: '8px 20px',
-          borderRadius: 24,
+          background: 'rgba(15, 23, 42, 0.95)',
+          border: '1px solid #818cf8',
+          backdropFilter: 'blur(10px)',
+          color: '#fff',
+          padding: '8px 22px',
+          borderRadius: 30,
           fontSize: 12,
-          fontWeight: 700,
+          fontWeight: 600,
           display: 'flex',
           alignItems: 'center',
           gap: 12,
-          boxShadow: '0 0 25px rgba(16, 185, 129, 0.5)'
+          boxShadow: '0 0 30px rgba(99, 102, 241, 0.4)'
         }}>
           <span>
-            🟢 Origen: <strong>{connectingSourceEntity.name}</strong>. Ahora haz clic en la tabla DESTINO para configurar la relación y la Clave Foránea (FK).
+            {pendingConnectorType === 'composition' && '◆ Composición: '}
+            {pendingConnectorType === 'aggregation' && '◇ Agregación: '}
+            {pendingConnectorType === 'inheritance' && '▷ Herencia: '}
+            {pendingConnectorType === 'dependency' && '⇢ Dependencia: '}
+            {!pendingConnectorType && '🟢 Enlace: '}
+            Origen <strong>{connectingSourceEntity.name}</strong> ➔ Haz clic en la tabla <strong>DESTINO</strong> para completar la unión.
           </span>
           <button
-            onClick={() => setConnectingSourceId(null)}
+            onClick={() => { setConnectingSourceId(null); setActiveTool('select'); setPendingConnectorType(null); }}
             style={{
-              background: 'rgba(0, 0, 0, 0.2)',
-              border: 'none',
-              color: '#fff',
-              padding: '2px 8px',
+              background: 'rgba(239, 68, 68, 0.25)',
+              border: '1px solid rgba(239, 68, 68, 0.5)',
+              color: '#fca5a5',
+              padding: '3px 10px',
               borderRadius: 12,
               fontSize: 11,
               cursor: 'pointer'
@@ -305,6 +530,33 @@ export const DiagramCanvas: React.FC<DiagramCanvasProps> = ({
           height: '5000px',
           pointerEvents: 'none'
         }}>
+          <defs>
+            {/* Flecha estándar para Dependencia */}
+            <marker id="marker-arrow" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="8" markerHeight="8" orient="auto-start-reverse">
+              <path d="M 0 1 L 9 5 L 0 9 z" fill="#f43f5e" />
+            </marker>
+
+            {/* Rombo Blanco (Agregación) */}
+            <marker id="marker-aggregation" viewBox="0 0 16 16" refX="8" refY="8" markerWidth="14" markerHeight="14" orient="auto">
+              <polygon points="8,1 15,8 8,15 1,8" fill="#0b1329" stroke="#38bdf8" strokeWidth="2" />
+            </marker>
+
+            {/* Rombo Relleno Morado/Azul (Composición) */}
+            <marker id="marker-composition" viewBox="0 0 16 16" refX="8" refY="8" markerWidth="14" markerHeight="14" orient="auto">
+              <polygon points="8,1 15,8 8,15 1,8" fill="#818cf8" stroke="#c7d2fe" strokeWidth="2" />
+            </marker>
+
+            {/* Triángulo Hueco (Herencia / Generalización) */}
+            <marker id="marker-inheritance" viewBox="0 0 16 16" refX="14" refY="8" markerWidth="14" markerHeight="14" orient="auto">
+              <polygon points="1,2 14,8 1,14" fill="#0b1329" stroke="#fbbf24" strokeWidth="2" />
+            </marker>
+
+            {/* Triángulo Hueco para Realización */}
+            <marker id="marker-realization" viewBox="0 0 16 16" refX="14" refY="8" markerWidth="14" markerHeight="14" orient="auto">
+              <polygon points="1,2 14,8 1,14" fill="#0b1329" stroke="#34d399" strokeWidth="2" />
+            </marker>
+          </defs>
+
           {model.relationships.map(rel => {
             const src = model.entities.find(e => e.id === rel.sourceEntityId);
             const tgt = model.entities.find(e => e.id === rel.targetEntityId);
@@ -318,18 +570,53 @@ export const DiagramCanvas: React.FC<DiagramCanvasProps> = ({
             const midX = (x1 + x2) / 2;
             const midY = (y1 + y2) / 2;
 
+            const relType = rel.type || 'association';
+            const isDashed = relType === 'dependency' || relType === 'realization' || (relType === 'association' && rel.cardinality === 'N:M');
+            
+            const strokeColor = 
+              relType === 'composition' ? '#818cf8' :
+              relType === 'aggregation' ? '#38bdf8' :
+              relType === 'inheritance' ? '#fbbf24' :
+              relType === 'dependency' ? '#f43f5e' :
+              relType === 'realization' ? '#34d399' : '#6366f1';
+
+            const markerStart = 
+              relType === 'aggregation' ? 'url(#marker-aggregation)' :
+              relType === 'composition' ? 'url(#marker-composition)' : undefined;
+
+            const markerEnd = 
+              relType === 'inheritance' ? 'url(#marker-inheritance)' :
+              relType === 'dependency' ? 'url(#marker-arrow)' :
+              relType === 'realization' ? 'url(#marker-realization)' : undefined;
+
+            const badgeSymbol = 
+              relType === 'composition' ? '◆' :
+              relType === 'aggregation' ? '◇' :
+              relType === 'inheritance' ? '▷' :
+              relType === 'dependency' ? '⇢' :
+              relType === 'realization' ? '⇸' : '⎯';
+
+            const badgeTitle = 
+              relType === 'composition' ? 'Composición' :
+              relType === 'aggregation' ? 'Agregación' :
+              relType === 'inheritance' ? 'Herencia (IS-A)' :
+              relType === 'dependency' ? 'Dependencia' :
+              relType === 'realization' ? 'Realización' : rel.cardinality;
+
             return (
               <g key={rel.id}>
-                {/* Línea de conexión */}
+                {/* Línea de conexión con marcadores UML */}
                 <line
                   x1={x1}
                   y1={y1}
                   x2={x2}
                   y2={y2}
-                  stroke="#6366f1"
+                  stroke={strokeColor}
                   strokeWidth="2.5"
-                  strokeDasharray={rel.cardinality === 'N:M' ? '5 5' : 'none'}
-                  opacity="0.85"
+                  strokeDasharray={isDashed ? '6 4' : 'none'}
+                  markerStart={markerStart}
+                  markerEnd={markerEnd}
+                  opacity="0.95"
                 />
 
                 {/* Badge en el centro de la línea (Clickeable para editar o eliminar) */}
@@ -338,13 +625,13 @@ export const DiagramCanvas: React.FC<DiagramCanvasProps> = ({
                   onClick={() => handleEditRelationship(rel)}
                 >
                   <rect
-                    x={midX - 45}
+                    x={midX - 60}
                     y={midY - 14}
-                    width="90"
+                    width="120"
                     height="28"
                     rx="8"
-                    fill="#11192e"
-                    stroke="#818cf8"
+                    fill="#0b1329"
+                    stroke={strokeColor}
                     strokeWidth="1.5"
                   />
                   <text
@@ -356,7 +643,7 @@ export const DiagramCanvas: React.FC<DiagramCanvasProps> = ({
                     textAnchor="middle"
                     fontFamily="var(--font-mono)"
                   >
-                    {rel.cardinality} {rel.name ? `• ${rel.name}` : ''}
+                    {badgeSymbol} {badgeTitle} {rel.name ? `• ${rel.name}` : ''}
                   </text>
                 </g>
               </g>
@@ -407,10 +694,16 @@ export const DiagramCanvas: React.FC<DiagramCanvasProps> = ({
       {/* Modal de Configuración de Relación & Foreign Key */}
       <RelationshipModal
         isOpen={isRelationshipModalOpen}
-        onClose={() => setIsRelationshipModalOpen(false)}
+        onClose={() => {
+          setIsRelationshipModalOpen(false);
+          setEditingRel(null);
+          setPendingConnectorType(null);
+          setActiveTool('select');
+        }}
         sourceEntity={relSourceEntity}
         targetEntity={relTargetEntity}
         existingRelationship={editingRel}
+        initialType={pendingConnectorType || editingRel?.type || 'association'}
         onSaveRelationship={onSaveRelationshipWithFK}
         onDeleteRelationship={onDeleteRelationship}
       />

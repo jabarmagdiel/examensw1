@@ -23,7 +23,7 @@ import { MappingView } from './components/Mapping/MappingView';
 import { DashboardView } from './components/Dashboard/DashboardView';
 import { MobileAppView } from './components/Mobile/MobileAppView';
 import { DatabaseManagerModal } from './components/Database/DatabaseManagerModal';
-import { DiagramModel, Entity, FunctionalDependency, ProjectFolder, Relationship, SystemRole, SystemUser, UserPresence } from './types/case';
+import { DiagramModel, Entity, FunctionalDependency, ProjectFolder, Relationship, RelationshipType, SystemRole, SystemUser, UserPresence } from './types/case';
 import { processNaturalLanguagePrompt, getOfflineVoiceQueue, createVeterinariaDomain, createFarmaciaDomain, createEcommerceDomain } from './services/aiAssistant';
 
 // Proyectos iniciales de la empresa de software cargados con datos completos de prueba
@@ -523,6 +523,7 @@ export default function App() {
     sourceEntityId: string;
     targetEntityId: string;
     cardinality: any;
+    type?: RelationshipType;
     name: string;
     foreignKeyName: string;
     createForeignKeyAttribute: boolean;
@@ -538,6 +539,7 @@ export default function App() {
         ...r,
         name: relData.name,
         cardinality: relData.cardinality,
+        type: relData.type || r.type || 'association',
         foreignKeyAttributeName: relData.foreignKeyName
       } : r);
     } else {
@@ -547,6 +549,7 @@ export default function App() {
         sourceEntityId: relData.sourceEntityId,
         targetEntityId: relData.targetEntityId,
         cardinality: relData.cardinality,
+        type: relData.type || 'association',
         foreignKeyAttributeName: relData.foreignKeyName
       };
       updatedRelationships.push(newRel);
