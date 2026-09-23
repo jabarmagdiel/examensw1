@@ -889,52 +889,155 @@ export function createEcommerceDomain(): {
 }
 
 /**
- * Simula y procesa la foto del diagrama (Visión IA)
+ * Procesa la foto del diagrama usando Google Gemini 1.5 Flash Vision (IA Real)
+ * Requiere VITE_GEMINI_API_KEY en el archivo .env
  */
 export async function processDiagramPhoto(imageDataUrl: string): Promise<{
   entities: Entity[];
   relationships: Relationship[];
   summary: string;
 }> {
-  await new Promise(resolve => setTimeout(resolve, 1000));
+  const apiKey = import.meta.env.VITE_GEMINI_API_KEY as string | undefined;
 
-  const entA: Entity = {
-    id: `photo_ent_${Date.now()}_1`,
-    name: 'Paciente',
-    tableName: 'pacientes',
-    x: 100,
-    y: 120,
-    attributes: [
-      { id: 'p1', name: 'id', type: 'BIGINT', isPrimaryKey: true, isNullable: false },
-      { id: 'p2', name: 'nombre', type: 'VARCHAR', isPrimaryKey: false, isNullable: false },
-      { id: 'p3', name: 'historia_clinica', type: 'VARCHAR', isPrimaryKey: false, isNullable: false }
-    ]
+  // ---------- FALLBACK si no hay API key ----------
+  if (!apiKey || apiKey === 'PEGA_TU_API_KEY_AQUI' || apiKey.trim() === '') {
+    throw new Error(
+      'Gemini API Key no configurada. Agrega VITE_GEMINI_API_KEY en tu archivo .env ' +
+      '(obtén una gratis en https://aistudio.google.com/apikey) y reinicia el servidor.'
+    );
+  }
+
+  // Convertir dataURL a base64 puro
+  const base64Image = imageDataUrl.split(',')[1];
+  const mimeType = imageDataUrl.split(';')[0].split(':')[1] || 'image/png';
+
+  const prompt = `Analiza esta imagen de un diagrama de clases UML (puede estar dibujado a mano, en pizarra, o en papel).
+Extrae todas las entidades (clases/tablas) que veas, sus atributos y las relaciones entre ellas.
+
+Responde ÚNICAMENTE con un JSON válido con esta estructura exacta (sin texto adicional, sin markdown, sin bloques de código):
+{
+  "entities": [
+    {
+      "name": "NombreClase",
+      "tableName": "nombre_tabla",
+      "attributes": [
+        {
+          "name": "nombreAtributo",
+          "type": "VARCHAR|BIGINT|INTEGER|DECIMAL|DATE|TIMESTAMP|BOOLEAN|TEXT",
+          "isPrimaryKey": true,
+          "isNullable": false
+        }
+      ]
+    }
+  ],
+  "relationships": [
+    {
+      "sourceName": "NombreClaseOrigen",
+      "targetName": "NombreClaseDestino",
+      "cardinality": "1:1|1:N|N:M",
+      "name": "nombreRelacion"
+    }
+  ],
+  "summary": "Descripción breve en español de lo que encontraste en el diagrama"
+}
+
+Reglas:
+- Si un atributo parece ser id/clave primaria, pon isPrimaryKey: true y type: BIGINT
+- Usa tableName en snake_case (ej: "orden_detalle" para "OrdenDetalle")
+- Si no hay relaciones visibles, pon relationships: []
+- Si no puedes reconocer ninguna clase, devuelve entities: [] con summary explicando el problema`;
+
+  const response = await fetch(
+    `https://generativelanguage.googleapis.com/v1beta/models/gemini-3.6-flash:generateContent?key=${apiKey}`,
+    {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        contents: [{
+          parts: [
+            { text: prompt },
+            { inline_data: { mime_type: mimeType, data: base64Image } }
+          ]
+        }],
+        generationConfig: {
+          temperature: 0.1,
+          topP: 0.8,
+          maxOutputTokens: 2048,
+        }
+      })
+    }
+  );
+
+  if (!response.ok) {
+    const errBody = await response.text();
+    throw new Error(`Gemini API error ${response.status}: ${errBody}`);
+  }
+
+  const geminiData = await response.json();
+  const rawText: string = geminiData?.candidates?.[0]?.content?.parts?.[0]?.text ?? '';
+
+  // Limpiar posibles markdown code fences
+  const jsonText = rawText
+    .replace(/```json\s*/gi, '')
+    .replace(/```\s*/g, '')
+    .trim();
+
+  let parsed: {
+    entities: Array<{
+      name: string;
+      tableName: string;
+      attributes: Array<{ name: string; type: string; isPrimaryKey: boolean; isNullable: boolean }>;
+    }>;
+    relationships: Array<{ sourceName: string; targetName: string; cardinality: string; name: string }>;
+    summary: string;
   };
 
-  const entB: Entity = {
-    id: `photo_ent_${Date.now()}_2`,
-    name: 'Doctor',
-    tableName: 'doctores',
-    x: 480,
-    y: 120,
-    attributes: [
-      { id: 'd1', name: 'id', type: 'BIGINT', isPrimaryKey: true, isNullable: false },
-      { id: 'd2', name: 'nombre', type: 'VARCHAR', isPrimaryKey: false, isNullable: false },
-      { id: 'd3', name: 'colegiatura', type: 'VARCHAR', isPrimaryKey: false, isNullable: false }
-    ]
-  };
+  try {
+    parsed = JSON.parse(jsonText);
+  } catch {
+    throw new Error(`Gemini devolvió respuesta no parseable: ${rawText.slice(0, 200)}`);
+  }
 
-  const rel: Relationship = {
-    id: `photo_rel_${Date.now()}`,
-    name: 'consulta',
-    sourceEntityId: entB.id,
-    targetEntityId: entA.id,
-    cardinality: '1:N'
-  };
+  const now = Date.now();
+
+  // Construir entidades con IDs únicos
+  const entityMap = new Map<string, string>(); // name → id
+  const entities: Entity[] = (parsed.entities ?? []).map((e, idx) => {
+    const id = `photo_ent_${now}_${idx}`;
+    entityMap.set(e.name, id);
+    const cols = 3;
+    const x = 80 + (idx % cols) * 320;
+    const y = 80 + Math.floor(idx / cols) * 220;
+    return {
+      id,
+      name: e.name,
+      tableName: e.tableName || e.name.toLowerCase().replace(/\s+/g, '_'),
+      x,
+      y,
+      attributes: (e.attributes ?? []).map((a, ai) => ({
+        id: `photo_attr_${now}_${idx}_${ai}`,
+        name: a.name,
+        type: (a.type as DataType) || 'VARCHAR',
+        isPrimaryKey: a.isPrimaryKey ?? false,
+        isNullable: a.isNullable ?? true,
+      }))
+    };
+  });
+
+  // Construir relaciones usando los IDs mapeados
+  const relationships: Relationship[] = (parsed.relationships ?? [])
+    .filter(r => entityMap.has(r.sourceName) && entityMap.has(r.targetName))
+    .map((r, ri) => ({
+      id: `photo_rel_${now}_${ri}`,
+      name: r.name || `rel_${ri}`,
+      sourceEntityId: entityMap.get(r.sourceName)!,
+      targetEntityId: entityMap.get(r.targetName)!,
+      cardinality: (r.cardinality as Cardinality) || '1:N',
+    }));
 
   return {
-    entities: [entA, entB],
-    relationships: [rel],
-    summary: 'Visión IA reconoció exitosamente 2 entidades (Paciente y Doctor) con sus atributos y relación 1:N.'
+    entities,
+    relationships,
+    summary: parsed.summary || `Gemini Vision reconoció ${entities.length} entidades y ${relationships.length} relaciones.`,
   };
 }
