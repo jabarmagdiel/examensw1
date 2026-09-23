@@ -18,6 +18,7 @@ export const DiagramPhotoScanner: React.FC<DiagramPhotoScannerProps> = ({
   const [imagePreview, setImagePreview] = useState<string | null>(null);
   const [isAnalyzing, setIsAnalyzing] = useState(false);
   const [scanResult, setScanResult] = useState<any | null>(null);
+  const [scanError, setScanError] = useState<string | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -27,6 +28,7 @@ export const DiagramPhotoScanner: React.FC<DiagramPhotoScannerProps> = ({
       reader.onload = () => {
         setImagePreview(reader.result as string);
         setScanResult(null);
+        setScanError(null);
       };
       reader.readAsDataURL(file);
     }
@@ -35,11 +37,13 @@ export const DiagramPhotoScanner: React.FC<DiagramPhotoScannerProps> = ({
   const handleScanImage = async () => {
     if (!imagePreview) return;
     setIsAnalyzing(true);
+    setScanError(null);
     try {
       const result = await processDiagramPhoto(imagePreview);
       setScanResult(result);
-    } catch (err) {
+    } catch (err: any) {
       console.error('Error scanning photo:', err);
+      setScanError(err?.message ?? 'Error desconocido al analizar la imagen.');
     } finally {
       setIsAnalyzing(false);
     }
@@ -189,8 +193,25 @@ export const DiagramPhotoScanner: React.FC<DiagramPhotoScannerProps> = ({
             disabled={isAnalyzing}
           >
             <Sparkles size={16} />
-            <span>{isAnalyzing ? 'Analizando trazos, tablas y flechas con Visión IA...' : 'Digitalizar Diagrama'}</span>
+            <span>{isAnalyzing ? 'Analizando con Gemini Vision IA...' : 'Digitalizar Diagrama con IA'}</span>
           </button>
+        )}
+
+        {/* Error Panel */}
+        {scanError && (
+          <div style={{
+            background: 'rgba(239, 68, 68, 0.12)',
+            border: '1px solid rgba(239, 68, 68, 0.4)',
+            borderRadius: 8,
+            padding: 14,
+            marginTop: 14,
+            fontSize: 12,
+            color: '#fca5a5',
+            lineHeight: 1.6
+          }}>
+            <strong style={{ display: 'block', marginBottom: 4, color: '#f87171' }}>⚠ Error al analizar la imagen:</strong>
+            {scanError}
+          </div>
         )}
 
         {/* Result Preview */}
