@@ -43,6 +43,8 @@ function getOrCreateRoom(roomId) {
     rooms.set(roomId, {
       model: null,
       users: new Map(),
+      chatMessages: [],
+      aiConfig: null,
       version: 1
     });
   }
@@ -71,6 +73,12 @@ io.on('connection', (socket) => {
     // Enviar estado actual del proyecto al recién conectado si existe
     if (room.model) {
       socket.emit('model_sync', { model: room.model, version: room.version });
+    }
+    if (room.chatMessages && room.chatMessages.length > 0) {
+      socket.emit('group_chat_sync', { roomId, messages: room.chatMessages });
+    }
+    if (room.aiConfig) {
+      socket.emit('ai_config_sync', { roomId, config: room.aiConfig });
     }
 
     // Notificar a todos la lista actualizada de usuarios
@@ -120,6 +128,26 @@ io.on('connection', (socket) => {
       byUser: user,
       timestamp: Date.now()
     });
+  });
+
+  // Chat Grupal Colaborativo + IA Senior Mentor
+  socket.on('group_chat_send', ({ roomId, message }) => {
+    if (!roomId || !message) return;
+    const room = getOrCreateRoom(roomId);
+    if (!room.chatMessages.some(m => m.id === message.id)) {
+      room.chatMessages.push(message);
+      if (room.chatMessages.length > 100) {
+        room.chatMessages = room.chatMessages.slice(-100);
+      }
+    }
+    socket.to(roomId).emit('group_chat_message', { roomId, message });
+  });
+
+  socket.on('ai_config_change', ({ roomId, config }) => {
+    if (!roomId || !config) return;
+    const room = getOrCreateRoom(roomId);
+    room.aiConfig = config;
+    socket.to(roomId).emit('ai_config_sync', { roomId, config });
   });
 
   socket.on('disconnect', () => {

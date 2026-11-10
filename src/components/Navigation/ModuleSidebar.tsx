@@ -38,6 +38,7 @@ interface ModuleSidebarProps {
   onOpenSpringBoot: () => void;
   onOpenTestClient: () => void;
   onOpenCollab: () => void;
+  onOpenSeniorChat?: () => void;
   onOpenDatabaseManager?: () => void;
   onLogout?: () => void;
 }
@@ -51,6 +52,7 @@ export const ModuleSidebar: React.FC<ModuleSidebarProps> = ({
   onOpenSpringBoot,
   onOpenTestClient,
   onOpenCollab,
+  onOpenSeniorChat,
   onOpenDatabaseManager,
   onLogout
 }) => {
@@ -267,6 +269,41 @@ export const ModuleSidebar: React.FC<ModuleSidebarProps> = ({
                 </div>
               )}
             </button>
+
+            {/* Botón Chat Grupal + IA Senior Mentor (2do Parcial) */}
+            {onOpenSeniorChat && (
+              <button
+                onClick={onOpenSeniorChat}
+                title="Abrir Chat Grupal Colaborativo con IA Senior Mentor"
+                style={{
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: 10,
+                  padding: '9px 10px',
+                  borderRadius: 8,
+                  marginTop: 6,
+                  background: 'linear-gradient(135deg, rgba(16, 185, 129, 0.22) 0%, rgba(99, 102, 241, 0.22) 100%)',
+                  border: '1px solid rgba(16, 185, 129, 0.45)',
+                  color: '#fff',
+                  justifyContent: isCollapsed ? 'center' : 'flex-start',
+                  width: '100%',
+                  cursor: 'pointer',
+                  transition: 'all 0.15s ease'
+                }}
+              >
+                <Sparkles size={17} color="#34d399" />
+                {!isCollapsed && (
+                  <div style={{ textAlign: 'left', flex: 1, minWidth: 0 }}>
+                    <div style={{ fontSize: 11.5, fontWeight: 800, color: '#34d399', whiteSpace: 'nowrap' }}>
+                      Chat Grupal IA Senior
+                    </div>
+                    <div style={{ fontSize: 9, color: 'rgba(255,255,255,0.75)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+                      Mentor Senior por Rol PUDS
+                    </div>
+                  </div>
+                )}
+              </button>
+            )}
           </div>
         </div>
 

@@ -75,10 +75,12 @@ export const AppHeader: React.FC<AppHeaderProps> = ({
       alignItems: 'center',
       justifyContent: 'space-between',
       position: 'relative',
-      zIndex: 100
+      zIndex: 100,
+      gap: 12,
+      overflowX: 'auto'
     }}>
       {/* Brand & Project Info */}
-      <div style={{ display: 'flex', alignItems: 'center', gap: 14 }}>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 14, flexShrink: 0 }}>
         <div style={{
           background: 'var(--grad-primary)',
           width: 38,
@@ -189,7 +191,7 @@ export const AppHeader: React.FC<AppHeaderProps> = ({
       </div>
 
       {/* Herramientas de Ingeniería y Colaboración */}
-      <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 6, flexShrink: 0, whiteSpace: 'nowrap' }}>
         {/* Normalización */}
         <button
           className="btn-secondary"
@@ -264,16 +266,26 @@ export const AppHeader: React.FC<AppHeaderProps> = ({
           <span>3 Sesiones</span>
         </button>
 
+        {/* Chat Grupal + IA Senior Mentor (2do Parcial) */}
+        <button
+          className="btn-secondary"
+          onClick={onOpenAIChat}
+          title="Abrir Sala de Chat Grupal Colaborativo con el Desarrollador Senior IA (Mentor PUDS)"
+          style={{
+            fontSize: 11,
+            background: 'linear-gradient(135deg, rgba(16, 185, 129, 0.2) 0%, rgba(99, 102, 241, 0.2) 100%)',
+            borderColor: 'rgba(16, 185, 129, 0.5)',
+            color: '#34d399',
+            fontWeight: 700
+          }}
+        >
+          <Sparkles size={14} color="#34d399" />
+          <span>Chat Grupal IA Senior</span>
+        </button>
+
         <div style={{ width: 1, height: 28, background: 'var(--border-subtle)', margin: '0 4px' }} />
 
-        {/* Herramientas IA: Chat & Foto & Voz */}
-        <button
-          className="btn-icon"
-          onClick={onOpenAIChat}
-          title="Chat Asistente IA"
-        >
-          <Sparkles size={15} color="#c084fc" />
-        </button>
+        {/* Herramientas IA: Foto & Voz */}
 
         <button
           className="btn-icon"

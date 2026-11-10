@@ -152,3 +152,51 @@ export interface VoiceCommandQueueItem {
   status: 'pending' | 'synced' | 'failed';
   resultSummary?: string;
 }
+
+export type SeniorAIMode = 'mentor' | 'hybrid' | 'solver';
+
+export type SeniorAIProvider = 'google_gemini' | 'local_llm' | 'builtin_senior';
+
+export interface SeniorAIConfig {
+  mode: SeniorAIMode;
+  provider: SeniorAIProvider;
+  autoIntervene: boolean;
+  googleApiKey: string;
+  googleModel: string;
+  localEndpoint: string;
+  localModel: string;
+  temperature: number;
+}
+
+export interface GroupChatMessage {
+  id: string;
+  projectId: string;
+  senderType: 'user' | 'senior_ai' | 'system';
+  senderId: string;
+  senderName: string;
+  senderRole: SystemRole | 'Senior AI Mentor';
+  senderColor: string;
+  targetUserName?: string;
+  targetUserRole?: SystemRole;
+  text: string;
+  timestamp: number;
+  aiMetadata?: {
+    mode: SeniorAIMode;
+    providerUsed: string;
+    contextSummary: string;
+    addressedTo: string;
+    addressedRole: SystemRole;
+    hasSolution?: boolean;
+    solutionApplied?: boolean;
+    proposedChange?: {
+      entities: Entity[];
+      relationships: Relationship[];
+      summary: string;
+    };
+    codeSnippet?: {
+      language: string;
+      title: string;
+      code: string;
+    };
+  };
+}

@@ -10,6 +10,7 @@ interface MultiSessionSimulatorProps {
   onSwitchUser: (user: UserPresence) => void;
   onTriggerConcurrentActivity: () => void;
   isSimulatingActive: boolean;
+  onOpenSeniorChat?: () => void;
 }
 
 export const MultiSessionSimulator: React.FC<MultiSessionSimulatorProps> = ({
@@ -19,7 +20,8 @@ export const MultiSessionSimulator: React.FC<MultiSessionSimulatorProps> = ({
   currentUser,
   onSwitchUser,
   onTriggerConcurrentActivity,
-  isSimulatingActive
+  isSimulatingActive,
+  onOpenSeniorChat
 }) => {
   if (!isOpen) return null;
 
@@ -117,24 +119,45 @@ export const MultiSessionSimulator: React.FC<MultiSessionSimulatorProps> = ({
           </ul>
         </div>
 
-        {/* Botón de Demostración de Actividad Concurrente en Vivo */}
-        <button
-          className="btn-primary"
-          style={{ width: '100%', padding: '12px 0', fontSize: 13, background: isSimulatingActive ? 'var(--accent-rose)' : 'var(--grad-primary)' }}
-          onClick={onTriggerConcurrentActivity}
-        >
-          {isSimulatingActive ? (
-            <>
-              <Pause size={16} />
-              <span>Detener Simulación Concurrente</span>
-            </>
-          ) : (
-            <>
-              <Activity size={16} />
-              <span>Iniciar Simulación de 3 Usuarios Colaborando en Vivo</span>
-            </>
+        {/* Botón de Demostración de Actividad Concurrente en Vivo + Sala Chat Grupal Senior AI */}
+        <div style={{ display: 'flex', gap: 10 }}>
+          <button
+            className="btn-primary"
+            style={{ flex: 1, padding: '12px 0', fontSize: 13, background: isSimulatingActive ? 'var(--accent-rose)' : 'var(--grad-primary)' }}
+            onClick={onTriggerConcurrentActivity}
+          >
+            {isSimulatingActive ? (
+              <>
+                <Pause size={16} />
+                <span>Detener Simulación Concurrente</span>
+              </>
+            ) : (
+              <>
+                <Activity size={16} />
+                <span>Iniciar Simulación de 3 Usuarios Colaborando en Vivo</span>
+              </>
+            )}
+          </button>
+
+          {onOpenSeniorChat && (
+            <button
+              className="btn-primary"
+              style={{
+                flex: 1,
+                padding: '12px 0',
+                fontSize: 13,
+                background: 'linear-gradient(135deg, #10b981 0%, #059669 100%)'
+              }}
+              onClick={() => {
+                onClose();
+                onOpenSeniorChat();
+              }}
+            >
+              <Sparkles size={16} />
+              <span>Abrir Chat Grupal + Senior AI Mentor</span>
+            </button>
           )}
-        </button>
+        </div>
       </div>
     </div>
   );

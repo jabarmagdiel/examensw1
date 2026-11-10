@@ -5,6 +5,7 @@ import { DiagramCanvas } from './components/Canvas/DiagramCanvas';
 import { NormalizationModal } from './components/Normalization/NormalizationModal';
 import { AIChatDrawer } from './components/AI/AIChatDrawer';
 import { ContextualAIAssistant } from './components/AI/ContextualAIAssistant';
+import { SeniorTeamChatModal } from './components/AI/SeniorTeamChatModal';
 import { VoiceAssistantModal } from './components/AI/VoiceAssistantModal';
 import { DiagramPhotoScanner } from './components/AI/DiagramPhotoScanner';
 import { ArchitectModal } from './components/ExportImport/ArchitectModal';
@@ -23,8 +24,9 @@ import { MappingView } from './components/Mapping/MappingView';
 import { DashboardView } from './components/Dashboard/DashboardView';
 import { MobileAppView } from './components/Mobile/MobileAppView';
 import { DatabaseManagerModal } from './components/Database/DatabaseManagerModal';
-import { DiagramModel, Entity, FunctionalDependency, ProjectFolder, Relationship, RelationshipType, SystemRole, SystemUser, UserPresence } from './types/case';
+import { DiagramModel, Entity, FunctionalDependency, GroupChatMessage, ProjectFolder, Relationship, RelationshipType, SeniorAIConfig, SystemRole, SystemUser, UserPresence } from './types/case';
 import { processNaturalLanguagePrompt, getOfflineVoiceQueue, createVeterinariaDomain, createFarmaciaDomain, createEcommerceDomain } from './services/aiAssistant';
+import { getInitialTeamChat, loadGroupChatMessages, loadSeniorAIConfig, saveGroupChatMessages, saveSeniorAIConfig } from './services/seniorAiMentor';
 
 // Proyectos iniciales de la empresa de software cargados con datos completos de prueba
 const DOMAIN_VETERINARIA = createVeterinariaDomain();
@@ -82,6 +84,25 @@ const INITIAL_COLLABORATORS: UserPresence[] = [
     name: 'Migue',
     role: 'Analista',
     color: '#3b82f6',
+    cursor: { x: 240, y: 180 },
+    lastActive: Date.now(),
+    status: 'online'
+  },
+  {
+    id: 'user_disenador',
+    name: 'Sofía',
+    role: 'Diseñador',
+    color: '#a855f7',
+    cursor: { x: 480, y: 240 },
+    lastActive: Date.now(),
+    status: 'online'
+  },
+  {
+    id: 'user_implementador',
+    name: 'Alex',
+    role: 'Implementador',
+    color: '#10b981',
+    cursor: { x: 680, y: 310 },
     lastActive: Date.now(),
     status: 'online'
   }
@@ -237,6 +258,7 @@ export default function App() {
   // Modales
   const [isNormalizerOpen, setIsNormalizerOpen] = useState(false);
   const [isAIChatOpen, setIsAIChatOpen] = useState(false);
+  const [isSeniorTeamChatOpen, setIsSeniorTeamChatOpen] = useState(false);
   const [isVoiceAssistantOpen, setIsVoiceAssistantOpen] = useState(false);
   const [isPhotoScannerOpen, setIsPhotoScannerOpen] = useState(false);
   const [isArchitectModalOpen, setIsArchitectModalOpen] = useState(false);
@@ -245,6 +267,20 @@ export default function App() {
   const [isMultiSessionOpen, setIsMultiSessionOpen] = useState(false);
   const [isLoginOpen, setIsLoginOpen] = useState(false);
   const [isDatabaseManagerOpen, setIsDatabaseManagerOpen] = useState(false);
+
+  // Estado del Chat Grupal Colaborativo + Configuración del Senior AI Mentor (2do Parcial)
+  const [seniorAIConfig, setSeniorAIConfig] = useState<SeniorAIConfig>(() => loadSeniorAIConfig());
+  const [groupChatMessages, setGroupChatMessages] = useState<GroupChatMessage[]>(() =>
+    loadGroupChatMessages(activeProjectId)
+  );
+
+  useEffect(() => {
+    setGroupChatMessages(loadGroupChatMessages(activeProjectId));
+  }, [activeProjectId]);
+
+  useEffect(() => {
+    saveGroupChatMessages(activeProjectId, groupChatMessages);
+  }, [activeProjectId, groupChatMessages]);
 
   // Contador de comandos offline en cola
   const [offlineVoiceQueueCount, setOfflineVoiceQueueCount] = useState<number>(getOfflineVoiceQueue().length);
@@ -350,6 +386,26 @@ export default function App() {
       socket.on('model_updated', ({ model: remoteModel }: any) => {
         if (remoteModel) {
           setProjects(prev => prev.map(p => p.id === remoteModel.id ? remoteModel : p));
+        }
+      });
+
+      // Eventos en tiempo real del Chat Grupal Colaborativo y Senior AI Mentor
+      socket.on('group_chat_sync', ({ messages: remoteMsgs }: { roomId: string; messages: GroupChatMessage[] }) => {
+        if (Array.isArray(remoteMsgs) && remoteMsgs.length > 0) {
+          setGroupChatMessages(remoteMsgs);
+        }
+      });
+
+      socket.on('group_chat_message', ({ message }: { roomId: string; message: GroupChatMessage }) => {
+        if (message) {
+          setGroupChatMessages(prev => (prev.some(m => m.id === message.id) ? prev : [...prev, message]));
+        }
+      });
+
+      socket.on('ai_config_sync', ({ config }: { roomId: string; config: SeniorAIConfig }) => {
+        if (config) {
+          setSeniorAIConfig(config);
+          saveSeniorAIConfig(config);
         }
       });
 
@@ -633,6 +689,28 @@ export default function App() {
     }, 'ai_model_generation');
   };
 
+  // Manejadores del Chat Grupal Colaborativo + Senior AI Mentor
+  const handleSendGroupChatMessage = (message: GroupChatMessage) => {
+    setGroupChatMessages(prev => (prev.some(m => m.id === message.id) ? prev : [...prev, message]));
+    if (socketRef.current?.connected && currentModel) {
+      socketRef.current.emit('group_chat_send', { roomId: currentModel.id, message });
+    }
+  };
+
+  const handleUpdateSeniorAIConfig = (newConfig: SeniorAIConfig) => {
+    setSeniorAIConfig(newConfig);
+    saveSeniorAIConfig(newConfig);
+    if (socketRef.current?.connected && currentModel) {
+      socketRef.current.emit('ai_config_change', { roomId: currentModel.id, config: newConfig });
+    }
+  };
+
+  const handleClearGroupChat = () => {
+    const initial = getInitialTeamChat(currentModel.id);
+    setGroupChatMessages(initial);
+    saveGroupChatMessages(currentModel.id, initial);
+  };
+
   const handleImportArchitectModel = (newModel: DiagramModel, message: string) => {
     broadcastModelChange(newModel, 'import_architect');
   };
@@ -750,7 +828,7 @@ export default function App() {
         onSelectModule={setActiveModule}
         activeProjectName={currentModel.name}
         onOpenNormalizer={() => setIsNormalizerOpen(true)}
-        onOpenAIChat={() => setIsAIChatOpen(true)}
+        onOpenAIChat={() => setIsSeniorTeamChatOpen(prev => !prev)}
         onOpenVoiceAssistant={() => setIsVoiceAssistantOpen(true)}
         onOpenPhotoScanner={() => setIsPhotoScannerOpen(true)}
         onOpenArchitectModal={() => setIsArchitectModalOpen(true)}
@@ -778,6 +856,7 @@ export default function App() {
           onOpenSpringBoot={() => setIsCodeExportOpen(true)}
           onOpenTestClient={() => setIsLiveFrontendOpen(true)}
           onOpenCollab={() => setIsMultiSessionOpen(true)}
+          onOpenSeniorChat={() => setIsSeniorTeamChatOpen(true)}
           onLogout={handleLogout}
         />
 
@@ -951,6 +1030,24 @@ export default function App() {
         onSwitchUser={setCurrentUser}
         onTriggerConcurrentActivity={handleToggleConcurrentActivity}
         isSimulatingActive={isSimulatingActive}
+        onOpenSeniorChat={() => setIsSeniorTeamChatOpen(true)}
+      />
+
+      <SeniorTeamChatModal
+        isOpen={isSeniorTeamChatOpen}
+        onClose={() => setIsSeniorTeamChatOpen(false)}
+        model={currentModel}
+        currentUser={currentUser}
+        collaborators={collaborators}
+        systemUsers={users}
+        selectedEntityId={selectedEntityId}
+        messages={groupChatMessages}
+        aiConfig={seniorAIConfig}
+        onSendMessage={handleSendGroupChatMessage}
+        onUpdateAIConfig={handleUpdateSeniorAIConfig}
+        onClearChat={handleClearGroupChat}
+        onSwitchUser={handleSwitchSessionUser}
+        onApplyChanges={handleApplyAIChanges}
       />
 
       <EditEntityModal

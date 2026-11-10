@@ -26,8 +26,8 @@ export function createApp() {
   // Soporte opcional para servir frontend estático si existe carpeta public/dist
   const possibleDistPaths = [
     path.join(__dirname, '../public'),
-    path.join(__dirname, '../../frontend/dist'),
-    path.join(__dirname, '../../dist')
+    path.join(__dirname, '../../dist'),
+    path.join(__dirname, '../../frontend/dist')
   ];
 
   for (const distPath of possibleDistPaths) {

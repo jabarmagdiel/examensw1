@@ -16,9 +16,31 @@ export function registerPresenceHandlers(io, socket) {
       socket.emit('model_sync', { model: room.model, version: room.version });
     }
 
+    // Enviar historial del chat grupal y configuración de IA Senior si existen en la sala
+    if (room.chatMessages && room.chatMessages.length > 0) {
+      socket.emit('group_chat_sync', { roomId, messages: room.chatMessages });
+    }
+    if (room.aiConfig) {
+      socket.emit('ai_config_sync', { roomId, config: room.aiConfig });
+    }
+
     // Difundir lista actualizada de colaboradores a toda la sala
     io.to(roomId).emit('users_updated', Array.from(room.users.values()));
     console.log(`[Colaboración] ${registeredUser.name} (${registeredUser.role}) entró a la sala: ${roomId}`);
+  });
+
+  // Chat Grupal Colaborativo + Respuestas del Senior AI Mentor
+  socket.on('group_chat_send', ({ roomId, message }) => {
+    if (!roomId || !message) return;
+    roomService.addChatMessage(roomId, message);
+    socket.to(roomId).emit('group_chat_message', { roomId, message });
+  });
+
+  // Cambio de configuración del Senior AI Mentor compartido en la sala
+  socket.on('ai_config_change', ({ roomId, config }) => {
+    if (!roomId || !config) return;
+    roomService.updateAIConfig(roomId, config);
+    socket.to(roomId).emit('ai_config_sync', { roomId, config });
   });
 
   // Movimiento de cursor y selección de entidades

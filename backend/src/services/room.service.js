@@ -12,11 +12,30 @@ class RoomService {
         id: roomId,
         model: null,
         users: new Map(),
+        chatMessages: [],
+        aiConfig: null,
         version: 1,
         createdAt: Date.now()
       });
     }
     return this.rooms.get(roomId);
+  }
+
+  addChatMessage(roomId, message) {
+    const room = this.getOrCreateRoom(roomId);
+    if (!room.chatMessages.some(m => m.id === message.id)) {
+      room.chatMessages.push(message);
+      if (room.chatMessages.length > 100) {
+        room.chatMessages = room.chatMessages.slice(-100);
+      }
+    }
+    return room.chatMessages;
+  }
+
+  updateAIConfig(roomId, config) {
+    const room = this.getOrCreateRoom(roomId);
+    room.aiConfig = config;
+    return room.aiConfig;
   }
 
   addUserToRoom(roomId, socketId, user) {
