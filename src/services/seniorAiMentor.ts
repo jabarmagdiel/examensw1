@@ -93,6 +93,173 @@ export interface ArchitecturalAuditFinding {
   proposalSummary?: string;
 }
 
+export interface MissingAttributeRecommendation {
+  entity: Entity;
+  currentCount: number;
+  suggestedAttributes: {
+    attribute: Attribute;
+    reason: string;
+  }[];
+}
+
+/**
+ * Analiza clase por clase qué atributos de negocio/técnicos faltan aumentar
+ * según el dominio y las entidades actuales del lienzo.
+ */
+export function analyzeMissingAttributesPerEntity(
+  model: DiagramModel,
+  filterEntityIds?: string[]
+): {
+  recommendations: MissingAttributeRecommendation[];
+  proposedEntities: Entity[];
+  totalAdded: number;
+  summary: string;
+} {
+  type CandidateAttr = {
+    name: string;
+    type: Attribute['type'];
+    length?: number;
+    isUnique?: boolean;
+    isNullable?: boolean;
+    reason: string;
+  };
+
+  const catalog: Record<string, CandidateAttr[]> = {
+    cliente: [
+      { name: 'email', type: 'VARCHAR', length: 120, isUnique: true, isNullable: false, reason: 'Correo único para envío de recordatorios y facturación electrónica' },
+      { name: 'fechaRegistro', type: 'DATE', isNullable: false, reason: 'Trazabilidad de antigüedad del propietario en la clínica' }
+    ],
+    mascota: [
+      { name: 'pesoKg', type: 'DECIMAL', isNullable: false, reason: 'Indispensable para calcular dosis exactas de medicamentos y anestesia' },
+      { name: 'sexo', type: 'VARCHAR', length: 15, isNullable: false, reason: 'Control clínico y diferenciación biológica del paciente' },
+      { name: 'esterilizado', type: 'BOOLEAN', isNullable: false, reason: 'Dato médico base para historial reproductivo y cirugías' }
+    ],
+    veterinario: [
+      { name: 'email', type: 'VARCHAR', length: 120, isUnique: true, isNullable: false, reason: 'Identificación corporativa y notificaciones de agenda médica' },
+      { name: 'turnoAtencion', type: 'VARCHAR', length: 50, isNullable: false, reason: 'Control de disponibilidad horaria para asignar citas sin solapamiento' }
+    ],
+    citamedica: [
+      { name: 'costoConsulta', type: 'DECIMAL', isNullable: false, reason: 'Permite registrar el importe económico de la atención y liquidar caja' },
+      { name: 'observaciones', type: 'TEXT', isNullable: true, reason: 'Notas previas de recepción o síntomas reportados al agendar' }
+    ],
+    historialclinico: [
+      { name: 'pesoRegistrado', type: 'DECIMAL', isNullable: false, reason: 'Control evolutivo del peso del paciente en cada consulta' },
+      { name: 'temperatura', type: 'DECIMAL', isNullable: true, reason: 'Signo vital crítico en la revisión física veterinaria' },
+      { name: 'proximoControl', type: 'DATE', isNullable: true, reason: 'Programación de seguimiento clínico o próxima vacuna' }
+    ],
+    proveedor: [
+      { name: 'emailContacto', type: 'VARCHAR', length: 120, isUnique: true, isNullable: false, reason: 'Canal oficial para órdenes de compra de laboratorio' },
+      { name: 'direccionFiscal', type: 'VARCHAR', length: 200, isNullable: false, reason: 'Requisito tributario y logístico de recepción' }
+    ],
+    medicamento: [
+      { name: 'principioActivo', type: 'VARCHAR', length: 120, isNullable: false, reason: 'Permite buscar equivalentes farmacológicos en mostrador' },
+      { name: 'requiereReceta', type: 'BOOLEAN', isNullable: false, reason: 'Control regulatorio para expendio de antibióticos/psicotrópicos' }
+    ],
+    lote: [
+      { name: 'costoUnitario', type: 'DECIMAL', isNullable: false, reason: 'Cálculo de margen de ganancia por lote ingresado' },
+      { name: 'ubicacionEstante', type: 'VARCHAR', length: 50, isNullable: true, reason: 'Localización rápida en almacén bajo método FEFO' }
+    ],
+    venta: [
+      { name: 'metodoPago', type: 'VARCHAR', length: 40, isNullable: false, reason: 'Arqueo de caja (Efectivo, QR, Tarjeta)' },
+      { name: 'descuento', type: 'DECIMAL', isNullable: false, reason: 'Registro de promociones o convenios aplicados' }
+    ],
+    usuario: [
+      { name: 'telefono', type: 'VARCHAR', length: 30, isNullable: true, reason: 'Contacto directo para coordinación de entregas' },
+      { name: 'direccionEnvio', type: 'VARCHAR', length: 200, isNullable: false, reason: 'Destino logístico predeterminado del comprador' }
+    ],
+    producto: [
+      { name: 'sku', type: 'VARCHAR', length: 50, isUnique: true, isNullable: false, reason: 'Código único de inventario para almacén y catálogo' },
+      { name: 'categoria', type: 'VARCHAR', length: 80, isNullable: false, reason: 'Clasificación comercial y filtros de búsqueda' }
+    ],
+    pedido: [
+      { name: 'metodoPago', type: 'VARCHAR', length: 40, isNullable: false, reason: 'Trazabilidad de pasarela de pago utilizada' },
+      { name: 'costoEnvio', type: 'DECIMAL', isNullable: false, reason: 'Desglose financiero entre subtotal de productos y flete' }
+    ],
+    detallepedido: [
+      { name: 'descuentoLinea', type: 'DECIMAL', isNullable: false, reason: 'Soporte para ofertas por volumen en cada ítem del carrito' }
+    ]
+  };
+
+  const recommendations: MissingAttributeRecommendation[] = [];
+  let totalAdded = 0;
+
+  const proposedEntities = model.entities.map(ent => {
+    if (filterEntityIds && filterEntityIds.length > 0 && !filterEntityIds.includes(ent.id)) {
+      return ent;
+    }
+
+    const normalizedName = ent.name
+      .toLowerCase()
+      .normalize('NFD')
+      .replace(/[\u0300-\u036f]/g, '')
+      .replace(/[^a-z0-9]/g, '');
+
+    const existingNames = new Set(ent.attributes.map(a => a.name.toLowerCase()));
+    const candidates: CandidateAttr[] = catalog[normalizedName] || [
+      { name: 'estado', type: 'VARCHAR', length: 30, isNullable: false, reason: `Control del ciclo de vida del registro en ${ent.name}` },
+      { name: 'fechaActualizacion', type: 'TIMESTAMP', isNullable: true, reason: `Auditoría temporal de cambios sobre ${ent.name}` }
+    ];
+
+    const missingForEntity = candidates.filter(c => !existingNames.has(c.name.toLowerCase()));
+
+    // Si ya tiene todos los candidatos primarios, sugerir atributos de auditoría de segundo nivel
+    const auditTier: CandidateAttr[] = [
+      { name: 'activo', type: 'BOOLEAN', isNullable: false, reason: `Borrado lógico (soft-delete) para no perder historial en ${ent.name}` },
+      { name: 'updatedAt', type: 'TIMESTAMP', isNullable: true, reason: `Timestamp de última modificación para auditoría en ${ent.name}` }
+    ];
+    const finalMissing: CandidateAttr[] =
+      missingForEntity.length > 0
+        ? missingForEntity
+        : auditTier.filter(c => !existingNames.has(c.name.toLowerCase()));
+
+    if (finalMissing.length === 0) {
+      return ent;
+    }
+
+    const suggestedAttributes = finalMissing.map((item, idx) => ({
+      attribute: {
+        id: `attr_sen_${ent.id}_${Date.now()}_${idx}`,
+        name: item.name,
+        type: item.type,
+        length: item.length,
+        isPrimaryKey: false,
+        isForeignKey: false,
+        isUnique: item.isUnique,
+        isNullable: item.isNullable ?? false
+      } as Attribute,
+      reason: item.reason
+    }));
+
+    totalAdded += suggestedAttributes.length;
+    recommendations.push({
+      entity: ent,
+      currentCount: ent.attributes.length,
+      suggestedAttributes
+    });
+
+    // Insertar los nuevos atributos antes de las llaves foráneas para mantener orden limpio (PK -> Atributos -> FK)
+    const pkAndNormal = ent.attributes.filter(a => !a.isForeignKey);
+    const fkAttrs = ent.attributes.filter(a => a.isForeignKey);
+
+    return {
+      ...ent,
+      attributes: [...pkAndNormal, ...suggestedAttributes.map(s => s.attribute), ...fkAttrs]
+    };
+  });
+
+  const summary =
+    recommendations.length > 0
+      ? `Aumentar ${totalAdded} atributo(s) recomendado(s) en ${recommendations.map(r => `${r.entity.name} (+${r.suggestedAttributes.length})`).join(', ')}`
+      : 'Todas las clases ya cuentan con sus atributos de dominio y auditoría completos';
+
+  return {
+    recommendations,
+    proposedEntities,
+    totalAdded,
+    summary
+  };
+}
+
 /**
  * Analiza en profundidad el modelo actual para darle a la IA conciencia real de todo el diagrama
  */
@@ -400,36 +567,55 @@ async function callGoogleGeminiAPI(
   const apiKey = config.googleApiKey?.trim() || (import.meta as any).env?.VITE_GEMINI_API_KEY || '';
   if (!apiKey) return null;
 
-  const modelName = config.googleModel || 'gemini-2.5-flash';
-  const url = `https://generativelanguage.googleapis.com/v1beta/models/${modelName}:generateContent?key=${encodeURIComponent(apiKey)}`;
+  const candidateModels = Array.from(
+    new Set([
+      config.googleModel || 'gemini-2.5-flash',
+      'gemini-2.5-flash',
+      'gemini-2.0-flash',
+      'gemini-1.5-flash',
+      'gemini-flash-latest'
+    ])
+  );
 
-  const response = await fetch(url, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({
-      system_instruction: {
-        parts: [{ text: systemInstruction }]
-      },
-      contents: [
-        {
-          role: 'user',
-          parts: [{ text: prompt }]
-        }
-      ],
-      generationConfig: {
-        temperature: config.temperature ?? 0.4,
-        maxOutputTokens: 900
+  let lastError: Error | null = null;
+  for (const modelName of candidateModels) {
+    try {
+      const url = `https://generativelanguage.googleapis.com/v1beta/models/${modelName}:generateContent?key=${encodeURIComponent(apiKey)}`;
+      const response = await fetch(url, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          system_instruction: {
+            parts: [{ text: systemInstruction }]
+          },
+          contents: [
+            {
+              role: 'user',
+              parts: [{ text: prompt }]
+            }
+          ],
+          generationConfig: {
+            temperature: config.temperature ?? 0.4,
+            maxOutputTokens: 1100
+          }
+        })
+      });
+
+      if (!response.ok) {
+        lastError = new Error(`Gemini API HTTP ${response.status} (${modelName})`);
+        continue;
       }
-    })
-  });
 
-  if (!response.ok) {
-    throw new Error(`Gemini API HTTP ${response.status}`);
+      const data = await response.json();
+      const text = data?.candidates?.[0]?.content?.parts?.[0]?.text;
+      if (text) return text;
+    } catch (e: any) {
+      lastError = e;
+    }
   }
 
-  const data = await response.json();
-  const text = data?.candidates?.[0]?.content?.parts?.[0]?.text;
-  return text || null;
+  if (lastError) throw lastError;
+  return null;
 }
 
 /**
@@ -512,6 +698,44 @@ export async function generateSeniorMentorReply(params: {
   const selectedEntity = model.entities.find(e => e.id === selectedEntityId) || null;
   const audit = analyzeDiagramContext(model);
   const lower = prompt.toLowerCase();
+  const normalizedPrompt = lower.normalize('NFD').replace(/[\u0300-\u036f]/g, '');
+
+  // Detectar si el usuario menciona una o varias clases específicas en su pregunta
+  const mentionedEntities = model.entities.filter(e => {
+    const cleanName = e.name.toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '');
+    return normalizedPrompt.includes(cleanName);
+  });
+
+  const isAskingAboutMissingAttributes =
+    normalizedPrompt.includes('atributo') ||
+    normalizedPrompt.includes('campo') ||
+    normalizedPrompt.includes('columna') ||
+    normalizedPrompt.includes('propiedad') ||
+    ((normalizedPrompt.includes('falta') ||
+      normalizedPrompt.includes('aumentar') ||
+      normalizedPrompt.includes('agregar') ||
+      normalizedPrompt.includes('anadir') ||
+      normalizedPrompt.includes('recomienda') ||
+      normalizedPrompt.includes('sugiere')) &&
+      !normalizedPrompt.includes('nueva tabla') &&
+      !normalizedPrompt.includes('nueva clase'));
+
+  const isAskingAboutMissingClasses =
+    (normalizedPrompt.includes('que clase') ||
+      normalizedPrompt.includes('que tabla') ||
+      normalizedPrompt.includes('que entidad') ||
+      normalizedPrompt.includes('otra clase') ||
+      normalizedPrompt.includes('otra tabla') ||
+      normalizedPrompt.includes('otra entidad') ||
+      normalizedPrompt.includes('falta alguna clase') ||
+      normalizedPrompt.includes('falta alguna tabla') ||
+      normalizedPrompt.includes('falta alguna entidad')) &&
+    !normalizedPrompt.includes('atributo');
+
+  const missingAttributesAnalysis = analyzeMissingAttributesPerEntity(
+    model,
+    mentionedEntities.length > 0 ? mentionedEntities.map(e => e.id) : undefined
+  );
 
   // 1. Verificar si la instrucción del usuario pide una modificación directa al diagrama (ej. "crear tabla...", "agregar atributo...", "relacionar...")
   const directCommandResult = executeVoiceCommand(prompt, model);
@@ -523,7 +747,14 @@ export async function generateSeniorMentorReply(params: {
       relationships: directCommandResult.model.relationships,
       summary: directCommandResult.summary
     };
+  } else if (isAskingAboutMissingAttributes && missingAttributesAnalysis.totalAdded > 0) {
+    proposedChange = {
+      entities: missingAttributesAnalysis.proposedEntities,
+      relationships: model.relationships,
+      summary: missingAttributesAnalysis.summary
+    };
   } else if (
+    isAskingAboutMissingClasses ||
     lower.includes('solucion') ||
     lower.includes('arregla') ||
     lower.includes('corrige') ||
@@ -708,11 +939,57 @@ export async function generateSeniorMentorReply(params: {
   const sampleRel = model.relationships[0];
   const sampleRelSource = sampleRel ? model.entities.find(e => e.id === sampleRel.sourceEntityId)?.name : undefined;
   const sampleRelTarget = sampleRel ? model.entities.find(e => e.id === sampleRel.targetEntityId)?.name : undefined;
-  const normalizedPrompt = lower.normalize('NFD').replace(/[\u0300-\u036f]/g, '');
 
   let directTopicAnswer = '';
 
-  if (
+  if (isAskingAboutMissingAttributes) {
+    if (missingAttributesAnalysis.recommendations.length > 0) {
+      const perClassLines = missingAttributesAnalysis.recommendations
+        .map(rec => {
+          const currentAttrNames = rec.entity.attributes.map(a => `\`${a.name}\``).join(', ');
+          const suggestedLines = rec.suggestedAttributes
+            .map(
+              s =>
+                `   ◦ **\`+ ${s.attribute.name}\`** (\`${s.attribute.type}${s.attribute.length ? `(${s.attribute.length})` : ''}${
+                  s.attribute.isUnique ? ', UNIQUE' : ''
+                }\`): ${s.reason}.`
+            )
+            .join('\n');
+          return `• **Clase \`${rec.entity.name}\`** *(actuales: ${currentAttrNames})*:\n${suggestedLines}`;
+        })
+        .join('\n\n');
+
+      const rolePerspective: Record<SystemRole, string> = {
+        Analista: `Como **Analista PUDS**, estos **${missingAttributesAnalysis.totalAdded} atributos** completan las reglas del negocio de **${model.name}** (contacto único, signos vitales, montos de atención y fechas de control).`,
+        Diseñador: `Como **Diseñador PUDS**, todos estos atributos dependen directamente de la **PK** de su propia clase sin crear dependencias transitivas, manteniendo tu modelo en **3FN / BCNF**.`,
+        Implementador: `Como **Implementador PUDS**, cada atributo ya tiene definido su tipo exacto SQL/JPA (\`VARCHAR\`, \`DECIMAL\`, \`DATE\`, \`BOOLEAN\`) y restricciones \`UNIQUE\` / \`NOT NULL\` para tus migraciones PostgreSQL.`,
+        Administrador: `Como **Administrador PUDS**, incorporar estos **${missingAttributesAnalysis.totalAdded} atributos** en las **${missingAttributesAnalysis.recommendations.length} clases** eleva la completitud funcional y de auditoría antes de pasar a producción.`
+      };
+
+      directTopicAnswer =
+        `🔍 **Auditoría de Atributos Faltantes por Clase en \`${model.name}\`:**\n` +
+        `He revisado tus **${model.entities.length} clases** actuales en el lienzo y detecté **${missingAttributesAnalysis.totalAdded} atributos clave** que conviene aumentar:\n\n` +
+        `${perClassLines}\n\n` +
+        `🎯 **Criterio para ${askingUser.name} (${askingUser.role}):** ${rolePerspective[askingUser.role]}`;
+    } else {
+      directTopicAnswer =
+        `✅ **Revisión de Atributos en \`${model.name}\`:**\n` +
+        `He inspeccionado todas las clases de tu diagrama (${model.entities.map(e => `**${e.name}**`).join(', ')}) y ya cuentan tanto con sus atributos primarios de negocio como con sus campos de auditoría completos.`;
+    }
+  } else if (isAskingAboutMissingClasses) {
+    const domainFinding = audit.findings.find(f => f.category === 'dominio') || audit.findings[0];
+    if (domainFinding) {
+      directTopicAnswer =
+        `🏗️ **Clases / Entidades que recomiendo agregar a \`${model.name}\`:**\n` +
+        `• **Propuesta principal:** **${domainFinding.title}**\n` +
+        `• **Justificación técnica:** ${domainFinding.detail}\n` +
+        `• **Impacto para ${askingUser.name} (${askingUser.role}):** Cierra el flujo transaccional del sistema conectándose limpiamente con tus clases actuales (${model.entities.map(e => `\`${e.name}\``).join(', ')}).`;
+    } else {
+      directTopicAnswer =
+        `🏗️ **Evaluación de Clases en \`${model.name}\`:**\n` +
+        `Tus ${model.entities.length} clases actuales (${model.entities.map(e => `\`${e.name}\``).join(', ')}) cubren el núcleo operativo. Podrías agregar una clase **\`AuditoriaEvento\`** o **\`ComprobantePago\`** si necesitas trazabilidad financiera adicional.`;
+    }
+  } else if (
     normalizedPrompt.includes('llave primaria') ||
     normalizedPrompt.includes('clave primaria') ||
     /\bpk\b/.test(normalizedPrompt) ||
