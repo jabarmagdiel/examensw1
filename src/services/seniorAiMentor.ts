@@ -70,7 +70,7 @@ export function getInitialTeamChat(projectId: string): GroupChatMessage[] {
       senderName: 'Arq. IA Senior (Mentor PUDS)',
       senderRole: 'Senior AI Mentor',
       senderColor: '#10b981',
-      text: `¡Equipo bienvenido a la sala de ingeniería colaborativa! Estoy conectado como **Desarrollador Senior y Mentor** con contexto completo del diagrama en tiempo real.\n\n• Sé exactamente **quién escribe** y cuál es su **rol PUDS** (*Analista, Diseñador, Implementador o Administrador*).\n• Analizo en vivo todas las entidades, claves primarias/foráneas, relaciones, dependencias funcionales y selección en el lienzo.\n• Pueden configurar mi nivel de intervención arriba (**Modo Mentor Guía**, **Modo Copiloto Revisor** o **Modo Solucionador Directo**) y el motor (**Google Gemini**, **Modelo Local Ollama** o **Motor Senior Integrado**).`,
+      text: `¡Qué tal equipo! Ya estoy conectado en la sala viendo el diagrama en tiempo real. Cualquier duda de dominio, diseño relacional, normalización o código Spring Boot me escriben por acá y lo vemos juntos.\n\nArriba pueden elegir si quieren que solo los **guíe** (*Mentor*), les **proponga cambios listos para aprobar** (*Copiloto*) o los **aplique directo en el lienzo** (*Solucionador*).`,
       timestamp: now - 120000,
       aiMetadata: {
         mode: 'hybrid',
@@ -523,13 +523,14 @@ export function buildSeniorSystemPrompt(params: {
     solver: `MODO CONFIGURADO: SOLUCIONADOR DIRECTO (Co-Autor Senior). Además de dar tu justificación breve como Senior, entrega la solución técnica completa y lista para aplicarse directamente en el diagrama.`
   }[config.mode];
 
-  return `Eres el Desarrollador Senior y Mentor de Arquitectura (Arq. IA Senior) integrado en la plataforma CASE Enterprise Studio bajo metodología PUDS.
-Estás participando en un CHAT GRUPAL en tiempo real junto con todo el equipo de desarrollo que construye el diagrama.
+  return `Eres el Desarrollador Senior del equipo (Arq. IA Senior) dentro de la plataforma CASE Enterprise Studio.
+Participas en el chat grupal como **un compañero técnico más del equipo** trabajando codo a codo sobre el mismo diagrama.
 
-REGLA CRÍTICA DE PERSONALIZACIÓN (NO RESPONDER GENÉRICAMENTE):
-- Quien te está hablando en este mensaje es: **${askingUser.name}** (Rol PUDS: **${askingUser.role}**).
-- ${roleInstruction}
-- NUNCA respondas de forma genérica; menciona siempre a ${askingUser.name}, su rol (${askingUser.role}) y las tablas/atributos reales del proyecto "${model.name}".
+ESTILO DE COMUNICACIÓN (MUY IMPORTANTE):
+- Habla de forma natural, cercana y directa, como un desarrollador Senior real en el chat del equipo (ej: "Buena pregunta, ${askingUser.name}...", "Mira, en nuestro diagrama...", "Para esto te conviene...").
+- PROHIBIDO usar encabezados robóticos o de plantilla como "Hola X — Te respondo desde la visión de..." o repetir el resumen completo del proyecto si no viene al caso.
+- Quien escribe ahora es **${askingUser.name}** (rol **${askingUser.role}**). ${roleInstruction}
+- Usa ejemplos concretos de las entidades y atributos reales de "${model.name}" cuando ayude a explicar.
 
 ${modeInstruction}
 
@@ -874,21 +875,7 @@ export async function generateSeniorMentorReply(params: {
     }
   }
 
-  // 4. Respuesta del Motor Senior Contextual Integrado (Personalizada por Usuario, Rol PUDS, Pregunta, Selección y Modo)
-  const entityListStr = model.entities.map(e => `**${e.name}** (${e.attributes.length} atrib.)`).join(', ');
-  const selectedContextLine = selectedEntity
-    ? `Veo que tienes seleccionada la entidad **${selectedEntity.name}** (\`${selectedEntity.attributes.map(a => a.name).join(', ')}\`) en tu lienzo.`
-    : `Contexto actual: **${model.name}** (${model.entities.length} entidades: ${entityListStr}).`;
-
-  // Encabezado personalizado según quién pregunta y su rol PUDS
-  const roleGreetingMap: Record<SystemRole, string> = {
-    Analista: `👋 Hola **${askingUser.name}** (**Analista PUDS**) — Te respondo desde la perspectiva de **Requisitos, Reglas de Negocio y Semántica del Dominio**:`,
-    Diseñador: `👋 Hola **${askingUser.name}** (**Diseñador PUDS**) — Te respondo enfocándome en **Estructura Relacional, Cardinalidades y Normalización (1FN-BCNF)**:`,
-    Implementador: `👋 Hola **${askingUser.name}** (**Implementador PUDS**) — Te respondo enfocándome en **Persistencia SQL, Rendimiento y Spring Boot 3 / JPA**:`,
-    Administrador: `👋 Hola **${askingUser.name}** (**Administrador PUDS**) — Te respondo desde la visión de **Gobernanza de Arquitectura, Calidad y Control del Equipo**:`
-  };
-
-  const roleHeader = roleGreetingMap[askingUser.role] || `👋 Hola **${askingUser.name}** (**${askingUser.role}**):`;
+  // 4. Respuesta del Motor Senior Contextual Integrado (Tono natural de compañero Senior del equipo)
   const engineLabel =
     config.provider === 'google_gemini'
       ? 'Motor Senior PUDS (Configura tu API Key Gemini en ⚙️ para LLM en la nube)'
@@ -896,17 +883,21 @@ export async function generateSeniorMentorReply(params: {
       ? `Motor Senior PUDS (Servidor local ${config.localModel} no detectado)`
       : 'Motor Senior Contextual PUDS';
 
+  const shortName = askingUser.name.split(' ')[0] || askingUser.name;
+
   // Si fue un comando directo sobre el diagrama
   if (directCommandResult.actionType !== 'UNKNOWN' && proposedChange) {
     if (config.mode === 'mentor') {
       return {
-        text: `${roleHeader}\n\n${selectedContextLine}\n\n💡 **Guía de Mentor Senior sobre tu solicitud ("${prompt}"):**\nComo **${askingUser.role}**, antes de mutar el esquema directamente conviene validar cómo impacta este cambio al resto del equipo (${collaborators.map(c => c.name).join(', ')}).\n\n• **Cambio analizado:** ${directCommandResult.summary}\n• **Recomendación para tu rol (${askingUser.role}):** ${
+        text: `Buen punto, **${shortName}**. Antes de aplicar ese cambio (*${directCommandResult.summary}*), revisemos cómo nos impacta en **${model.name}**:\n\n• ${
           askingUser.role === 'Analista'
-            ? 'Verifica qué dependencia funcional (X -> Y) justifica este elemento dentro de las reglas del cliente ' + (model.client || '') + '.'
+            ? `Verifica si hay alguna regla de negocio del cliente (${model.client || 'el proyecto'}) o dependencia funcional que lo respalde.`
             : askingUser.role === 'Diseñador'
-            ? 'Asegúrate de definir la cardinalidad exacta y si requiere clave foránea NOT NULL para mantener BCNF.'
-            : 'Revisa que el tipo de dato mapee limpiamente a una propiedad `@Column` en tu entidad JPA sin romper migraciones.'
-        }\n\n*Estás en **Modo Mentor Guía**; si deseas aplicar la solución, cambia a **Modo Copiloto** o **Solucionador Directo**.*`,
+            ? `Fíjate bien en la cardinalidad y si la clave foránea debería quedar \`NOT NULL\` para no romper **BCNF**.`
+            : askingUser.role === 'Implementador'
+            ? `Asegúrate de que el tipo de dato mapee limpio a \`@Column\` en JPA sin romper migraciones existentes.`
+            : `Coordina con el equipo (${collaborators.map(c => c.name.split(' ')[0]).join(', ')}) si todos están de acuerdo antes de modificar el esquema.`
+        }\n\n*(Estoy en **Modo Mentor**, así que no toqué el lienzo todavía. Si quieres que lo aplique, pásame a **Copiloto** o **Solucionador Directo**).*`,
         providerUsed: engineLabel,
         proposedChange: undefined,
         codeSnippet,
@@ -916,7 +907,7 @@ export async function generateSeniorMentorReply(params: {
 
     if (config.mode === 'solver') {
       return {
-        text: `${roleHeader}\n\n${selectedContextLine}\n\n⚡ **Solución Aplicada en Vivo por el Senior AI:**\n• ${directCommandResult.summary}\n• **Validación para ${askingUser.name} (${askingUser.role}):** He sincronizado el cambio en el diagrama compartido de **${model.name}** para que todo el equipo lo vea al instante.`,
+        text: `Listo **${shortName}**, ya lo apliqué directo en el lienzo para todo el equipo:\n• **Cambio realizado:** ${directCommandResult.summary}.`,
         providerUsed: engineLabel,
         proposedChange,
         codeSnippet,
@@ -925,7 +916,7 @@ export async function generateSeniorMentorReply(params: {
     }
 
     return {
-      text: `${roleHeader}\n\n${selectedContextLine}\n\n🛠️ **Propuesta Técnica del Senior para ${askingUser.name}:**\nHe preparado el cambio solicitado sobre **${model.name}**:\n• ${directCommandResult.summary}\n\nHaz clic en **"Aplicar Solución del Senior"** abajo para confirmar e inyectarlo en el lienzo colaborativo.`,
+      text: `Dale **${shortName}**, ya armé el cambio sobre **${model.name}**:\n• ${directCommandResult.summary}\n\nSi te parece bien, dale al botón verde de abajo para aplicarlo al diagrama.`,
       providerUsed: engineLabel,
       proposedChange,
       codeSnippet,
@@ -933,16 +924,22 @@ export async function generateSeniorMentorReply(params: {
     };
   }
 
-  // 4.1 Detección inteligente del tema preguntado por el usuario para responder DIRECTAMENTE su duda
-  const sampleEnt = selectedEntity || model.entities[0];
+  // 4.1 Detección inteligente del tema preguntado para responder como un compañero Senior directo al grano
+  const sampleEnt = mentionedEntities[0] || selectedEntity || model.entities[0];
   const samplePK = sampleEnt?.attributes.find(a => a.isPrimaryKey)?.name || 'id';
+  const sampleAttrList = sampleEnt?.attributes.filter(a => !a.isPrimaryKey && !a.isForeignKey).slice(0, 3).map(a => `\`${a.name}\``).join(', ') || '`nombre`, `estado`';
   const sampleRel = model.relationships[0];
   const sampleRelSource = sampleRel ? model.entities.find(e => e.id === sampleRel.sourceEntityId)?.name : undefined;
   const sampleRelTarget = sampleRel ? model.entities.find(e => e.id === sampleRel.targetEntityId)?.name : undefined;
 
   let directTopicAnswer = '';
 
-  if (isAskingAboutMissingAttributes) {
+  const isGreeting = /^(hola|buenas|hey|que tal|como estan|buenos dias|buenas tardes|buenas noches|saludos)\b/.test(normalizedPrompt.trim());
+
+  if (isGreeting && normalizedPrompt.length < 40) {
+    directTopicAnswer =
+      `¡Qué tal **${shortName}**! Aquí ando revisando el diagrama de **${model.name}** (${model.entities.length} clases: ${model.entities.map(e => `\`${e.name}\``).join(', ')}).\n\n¿En qué nos enfocamos ahora? Puedo revisar atributos que falten, validar normalización, explicar relaciones o generar entidades JPA.`;
+  } else if (isAskingAboutMissingAttributes) {
     if (missingAttributesAnalysis.recommendations.length > 0) {
       const perClassLines = missingAttributesAnalysis.recommendations
         .map(rec => {
@@ -955,40 +952,64 @@ export async function generateSeniorMentorReply(params: {
                 }\`): ${s.reason}.`
             )
             .join('\n');
-          return `• **Clase \`${rec.entity.name}\`** *(actuales: ${currentAttrNames})*:\n${suggestedLines}`;
+          return `• **\`${rec.entity.name}\`** *(ya tiene: ${currentAttrNames})*:\n${suggestedLines}`;
         })
         .join('\n\n');
 
-      const rolePerspective: Record<SystemRole, string> = {
-        Analista: `Como **Analista PUDS**, estos **${missingAttributesAnalysis.totalAdded} atributos** completan las reglas del negocio de **${model.name}** (contacto único, signos vitales, montos de atención y fechas de control).`,
-        Diseñador: `Como **Diseñador PUDS**, todos estos atributos dependen directamente de la **PK** de su propia clase sin crear dependencias transitivas, manteniendo tu modelo en **3FN / BCNF**.`,
-        Implementador: `Como **Implementador PUDS**, cada atributo ya tiene definido su tipo exacto SQL/JPA (\`VARCHAR\`, \`DECIMAL\`, \`DATE\`, \`BOOLEAN\`) y restricciones \`UNIQUE\` / \`NOT NULL\` para tus migraciones PostgreSQL.`,
-        Administrador: `Como **Administrador PUDS**, incorporar estos **${missingAttributesAnalysis.totalAdded} atributos** en las **${missingAttributesAnalysis.recommendations.length} clases** eleva la completitud funcional y de auditoría antes de pasar a producción.`
+      const roleNote: Record<SystemRole, string> = {
+        Analista: `Con esto dejamos cubiertas las reglas del negocio que normalmente piden en auditoría funcional.`,
+        Diseñador: `Todos dependen directo de la \`PK\` de su propia clase, así que seguimos limpios en **3FN / BCNF**.`,
+        Implementador: `Ya los dejé tipados para PostgreSQL/JPA (\`VARCHAR\`, \`DECIMAL\`, \`DATE\`, \`BOOLEAN\`) listos para generar tus \`@Entity\`.`,
+        Administrador: `Con estos **${missingAttributesAnalysis.totalAdded} campos** el modelo queda mucho más sólido antes de pasar a producción.`
       };
 
       directTopicAnswer =
-        `🔍 **Auditoría de Atributos Faltantes por Clase en \`${model.name}\`:**\n` +
-        `He revisado tus **${model.entities.length} clases** actuales en el lienzo y detecté **${missingAttributesAnalysis.totalAdded} atributos clave** que conviene aumentar:\n\n` +
+        `Estuve revisando las clases de **${model.name}**, **${shortName}**, y sí veo **${missingAttributesAnalysis.totalAdded} atributos** que nos convendría aumentar:\n\n` +
         `${perClassLines}\n\n` +
-        `🎯 **Criterio para ${askingUser.name} (${askingUser.role}):** ${rolePerspective[askingUser.role]}`;
+        `${roleNote[askingUser.role]}`;
     } else {
       directTopicAnswer =
-        `✅ **Revisión de Atributos en \`${model.name}\`:**\n` +
-        `He inspeccionado todas las clases de tu diagrama (${model.entities.map(e => `**${e.name}**`).join(', ')}) y ya cuentan tanto con sus atributos primarios de negocio como con sus campos de auditoría completos.`;
+        `Ya revisé todas las clases de **${model.name}** (**${shortName}**) y están bastante completas: ya tienen sus atributos clave de negocio y campos de auditoría.`;
     }
   } else if (isAskingAboutMissingClasses) {
     const domainFinding = audit.findings.find(f => f.category === 'dominio') || audit.findings[0];
     if (domainFinding) {
       directTopicAnswer =
-        `🏗️ **Clases / Entidades que recomiendo agregar a \`${model.name}\`:**\n` +
-        `• **Propuesta principal:** **${domainFinding.title}**\n` +
-        `• **Justificación técnica:** ${domainFinding.detail}\n` +
-        `• **Impacto para ${askingUser.name} (${askingUser.role}):** Cierra el flujo transaccional del sistema conectándose limpiamente con tus clases actuales (${model.entities.map(e => `\`${e.name}\``).join(', ')}).`;
+        `Mirando **${model.name}**, **${shortName}**, nos vendría bien agregar **${domainFinding.title}**.\n\n` +
+        `${domainFinding.detail} Así cerramos el circuito completo junto con ${model.entities.map(e => `\`${e.name}\``).join(', ')}.`;
     } else {
       directTopicAnswer =
-        `🏗️ **Evaluación de Clases en \`${model.name}\`:**\n` +
-        `Tus ${model.entities.length} clases actuales (${model.entities.map(e => `\`${e.name}\``).join(', ')}) cubren el núcleo operativo. Podrías agregar una clase **\`AuditoriaEvento\`** o **\`ComprobantePago\`** si necesitas trazabilidad financiera adicional.`;
+        `Con las ${model.entities.length} clases que tenemos (${model.entities.map(e => `\`${e.name}\``).join(', ')}) el núcleo ya está cubierto, **${shortName}**. Si quieres llevar el proyecto a producción, lo único que sumaría sería una clase \`ComprobantePago\` o \`AuditoriaEvento\`.`;
     }
+  } else if (
+    normalizedPrompt.includes('que es una clase') ||
+    normalizedPrompt.includes('que es clase') ||
+    normalizedPrompt.includes('que son las clases') ||
+    normalizedPrompt.includes('que es una entidad') ||
+    normalizedPrompt.includes('que es entidad') ||
+    normalizedPrompt.includes('que es una tabla')
+  ) {
+    const roleExample: Record<SystemRole, string> = {
+      Analista: `Desde negocio, cada clase representa un **concepto real del sistema** con reglas propias (por ejemplo, \`${sampleEnt?.name || 'Producto'}\` guarda ${sampleAttrList}).`,
+      Diseñador: `En nuestro diagrama, cada clase UML se transforma en una **tabla relacional** (\`${sampleEnt?.tableName || sampleEnt?.name.toLowerCase() || 'tabla'}\`) con su PK \`${samplePK}\` y sus llaves foráneas para conectar con las demás.`,
+      Implementador: `En Java / Spring Boot cada clase del lienzo se convierte directo en un \`@Entity public class ${sampleEnt?.name || 'Entidad'}\` mapeado con JPA/Hibernate a PostgreSQL.`,
+      Administrador: `Para el equipo, las clases son los **bloques base de la arquitectura**: si están bien definidas desde el inicio (como \`${sampleEnt?.name || 'Usuario'}\`), evitamos retrabajo en backend y base de datos.`
+    };
+    directTopicAnswer =
+      `Claro **${shortName}**: en nuestro diagrama, una **clase** (o **entidad**) es el molde que representa un objeto o concepto importante del negocio y agrupa sus datos (atributos).\n\n` +
+      `• **Ejemplo aquí mismo:** \`${sampleEnt?.name || 'Cliente'}\` es una clase que tiene su identificador \`${samplePK}\` y sus datos propios (${sampleAttrList}). Cada instancia real (un registro en BD o un objeto en código) nace de esa clase.\n` +
+      `• ${roleExample[askingUser.role]}`;
+  } else if (
+    normalizedPrompt.includes('que es un atributo') ||
+    normalizedPrompt.includes('que es atributo') ||
+    normalizedPrompt.includes('que son los atributos') ||
+    normalizedPrompt.includes('que es una columna') ||
+    normalizedPrompt.includes('que es un campo')
+  ) {
+    directTopicAnswer =
+      `Un **atributo**, **${shortName}**, es cada dato específico o característica que describe a una clase (en la base de datos termina siendo una **columna**).\n\n` +
+      `• **Ejemplo en nuestro diagrama:** En \`${sampleEnt?.name || 'Producto'}\` tienes atributos como ${sampleAttrList}, además de \`${samplePK}\` como llave primaria.\n` +
+      `• Cada atributo lleva su tipo de dato (\`VARCHAR\`, \`INTEGER\`, \`DECIMAL\`, \`DATE\`, \`BOOLEAN\`) y si permite nulos o es único.`;
   } else if (
     normalizedPrompt.includes('llave primaria') ||
     normalizedPrompt.includes('clave primaria') ||
@@ -996,16 +1017,15 @@ export async function generateSeniorMentorReply(params: {
     normalizedPrompt.includes('primary key')
   ) {
     const roleAngle: Record<SystemRole, string> = {
-      Analista: `Para tu rol de **Analista**, representa el **identificador único de negocio** que garantiza que no existan dos registros duplicados de una misma entidad (por ejemplo, que dos \`${sampleEnt?.name || 'Cliente'}\` no compartan el mismo \`${samplePK}\`, o un identificador natural como \`dni\` o \`email\`).`,
-      Diseñador: `Para tu rol de **Diseñador**, la PK es el determinante principal (PK → todos los demás atributos) sobre el cual se valida la **2FN, 3FN y BCNF**, y sirve como punto de anclaje para que otras tablas la referencien mediante una **Clave Foránea (FK)**.`,
-      Implementador: `Para tu rol de **Implementador**, en PostgreSQL se traduce en una restricción \`PRIMARY KEY\` con índice B-Tree automático y en Spring Boot JPA se anota con \`@Id\` y \`@GeneratedValue(strategy = GenerationType.IDENTITY)\` sobre \`${sampleEnt?.name || 'Entidad'}.${samplePK}\`.`,
-      Administrador: `Para tu rol de **Administrador**, asegurar que el 100% de las tablas tengan PK definida (${model.entities.length - audit.entitiesWithoutPK.length}/${model.entities.length} tablas actuales cumplen) garantiza trazabilidad, auditoría y cero inconsistencias al desplegar.`
+      Analista: `En negocio nos asegura que nunca haya dos \`${sampleEnt?.name || 'Cliente'}\` duplicados sin forma de distinguirlos.`,
+      Diseñador: `Es el determinante base (\`${samplePK} → todos los atributos\`) para validar **2FN/3FN** y que otras tablas puedan apuntarle mediante FKs.`,
+      Implementador: `En Spring Boot se mapea con \`@Id\` + \`@GeneratedValue\` sobre \`${sampleEnt?.name || 'Entidad'}.${samplePK}\` y en PostgreSQL crea su índice único automático.`,
+      Administrador: `Ahora mismo **${model.entities.length - audit.entitiesWithoutPK.length} de ${model.entities.length}** tablas la tienen definida correctamente.`
     };
     directTopicAnswer =
-      `🔑 **¿Qué es una Llave Primaria (Primary Key / PK)?**\n` +
-      `Es el atributo (o conjunto mínimo de atributos) que **identifica de forma única e irrepetible** cada fila de una tabla. Debe cumplir dos reglas estrictas: ser **única** (no se repite) y **no nula** (\`NOT NULL\`).\n\n` +
-      `• **Ejemplo en tu diagrama actual (\`${model.name}\`):** En la entidad **${sampleEnt?.name || 'Principal'}**, el atributo \`${samplePK}\` actúa como llave primaria (\`[PK]\`).\n` +
-      `• **Enfoque para ${askingUser.name} (${askingUser.role}):** ${roleAngle[askingUser.role]}`;
+      `La **Llave Primaria (PK)**, **${shortName}**, es el atributo que identifica de forma **única e irrepetible** cada registro de una tabla (nunca se repite ni puede ser \`NULL\`).\n\n` +
+      `• Por ejemplo, en \`${sampleEnt?.name || 'Principal'}\` usamos \`${samplePK}\` como \`[PK]\`.\n` +
+      `• ${roleAngle[askingUser.role]}`;
   } else if (
     normalizedPrompt.includes('llave foranea') ||
     normalizedPrompt.includes('clave foranea') ||
@@ -1014,20 +1034,19 @@ export async function generateSeniorMentorReply(params: {
     normalizedPrompt.includes('foreign key')
   ) {
     const roleAngle: Record<SystemRole, string> = {
-      Analista: `Para tu rol de **Analista**, expresa la **dependencia entre reglas de negocio**: por ejemplo, no puede existir un registro hijo sin pertenecer a un registro padre válido.`,
-      Diseñador: `Para tu rol de **Diseñador**, materializa las relaciones \`1:N\` y \`1:1\` en el modelo lógico/físico, ubicándose siempre en la tabla del lado **"Muchos" (N)** para mantener la integridad referencial.`,
-      Implementador: `Para tu rol de **Implementador**, en JPA se mapea con \`@ManyToOne\` + \`@JoinColumn(name = "...")\` y conviene crear un índice SQL sobre ella para acelerar los \`JOIN\`.`,
-      Administrador: `Para tu rol de **Administrador**, evita registros huérfanos en base de datos asegurando integridad referencial (\`ON DELETE\` / \`ON UPDATE\`).`
+      Analista: `Asegura la regla de negocio de que un registro hijo no quede huérfano sin su padre.`,
+      Diseñador: `Siempre va en la tabla del lado **Muchos (\`N\`)** en las relaciones \`1:N\`.`,
+      Implementador: `En JPA lo mapeamos con \`@ManyToOne(fetch = FetchType.LAZY)\` y \`@JoinColumn\`, y conviene indexarla en SQL.`,
+      Administrador: `Mantiene la integridad referencial entre tablas al borrar o actualizar.`
     };
     directTopicAnswer =
-      `🔗 **¿Qué es una Llave Foránea (Foreign Key / FK)?**\n` +
-      `Es un atributo en una tabla hija que **apunta a la Llave Primaria (PK)** de otra tabla padre para conectarlas y garantizar **integridad referencial**.\n\n` +
-      `• **Ejemplo en tu diagrama (\`${model.name}\`):** ${
+      `Una **Llave Foránea (FK)**, **${shortName}**, es el campo que conecta dos tablas apuntando desde una tabla hija a la **PK** de la tabla padre.\n\n` +
+      `• ${
         sampleRel && sampleRelSource && sampleRelTarget
-          ? `En la relación \`${sampleRelSource} (${sampleRel.cardinality}) → ${sampleRelTarget}\`, **${sampleRelTarget}** recibe la FK \`${sampleRel.foreignKeyAttributeName || `${sampleRelSource.toLowerCase()}_id`}\`.`
-          : `Cuando conectas dos entidades en el lienzo con \`1:N\`, la tabla destino recibe automáticamente una columna \`*_id\` marcada como \`[FK]\`.`
+          ? `Aquí lo puedes ver entre \`${sampleRelSource}\` y \`${sampleRelTarget}\` con \`${sampleRel.foreignKeyAttributeName || `${sampleRelSource.toLowerCase()}_id`}\`.`
+          : `Cuando unes dos clases \`1:N\` en el lienzo, se crea automáticamente el campo \`*_id [FK]\` en la clase destino.`
       }\n` +
-      `• **Enfoque para ${askingUser.name} (${askingUser.role}):** ${roleAngle[askingUser.role]}`;
+      `• ${roleAngle[askingUser.role]}`;
   } else if (
     normalizedPrompt.includes('normaliz') ||
     normalizedPrompt.includes('1fn') ||
@@ -1037,16 +1056,14 @@ export async function generateSeniorMentorReply(params: {
     normalizedPrompt.includes('dependencia funcional')
   ) {
     directTopicAnswer =
-      `📐 **Normalización (1FN, 2FN, 3FN y BCNF) en \`${model.name}\`:**\n` +
-      `La normalización organiza tus tablas y **dependencias funcionales** para eliminar redundancias y anomalías de inserción, actualización y borrado:\n` +
-      `1. **1FN:** Atributos atómicos sin listas ni grupos repetitivos (todas tus ${model.entities.length} entidades tienen PK definida: ${audit.entitiesWithoutPK.length === 0 ? 'Cumple' : 'Faltan PKs en ' + audit.entitiesWithoutPK.map(e => e.name).join(', ')}).\n` +
-      `2. **2FN:** Ningún atributo no clave depende parcialmente de una clave compuesta.\n` +
-      `3. **3FN:** Sin dependencias transitivas (PK → A → B).\n` +
-      `4. **BCNF:** Todo determinante de una dependencia funcional no trivial es superclave.\n\n` +
-      `• **Estado para ${askingUser.name} (${askingUser.role}):** Tienes **${model.functionalDependencies?.length || 0} dependencias funcionales** registradas. ${
+      `Revisemos cómo vamos con la **normalización** en **${model.name}**, **${shortName}**:\n\n` +
+      `1. **1FN:** Campos atómicos y PK en cada tabla (${audit.entitiesWithoutPK.length === 0 ? 'todas cumplen ✅' : 'ojo, falta PK en ' + audit.entitiesWithoutPK.map(e => e.name).join(', ')}).\n` +
+      `2. **2FN y 3FN:** Que ningún atributo dependa solo de parte de una clave ni transitivamente de otro atributo no clave.\n` +
+      `3. **BCNF:** Que todo determinante sea superclave.\n\n` +
+      `Ahora tenemos **${model.functionalDependencies?.length || 0} dependencias funcionales** cargadas. ${
         audit.nmRelationships.length > 0
-          ? `Ojo: detecté **${audit.nmRelationships.length} relación(es) N:M** que conviene descomponer en tabla intermedia.`
-          : 'Puedes abrir el botón **Normalización** arriba para ejecutar el verificador automático.'
+          ? `Lo único a corregir es que hay **${audit.nmRelationships.length} relación(es) N:M** sin tabla intermedia.`
+          : 'Puedes abrir **Normalización** arriba si quieres correr el chequeo formal completo.'
       }`;
   } else if (
     normalizedPrompt.includes('cardinalidad') ||
@@ -1057,15 +1074,14 @@ export async function generateSeniorMentorReply(params: {
     normalizedPrompt.includes('relacion')
   ) {
     directTopicAnswer =
-      `🔀 **Cardinalidades y Relaciones en \`${model.name}\`:**\n` +
-      `Definen cuántas instancias de una entidad se asocian con otra:\n` +
-      `• **1:1 (Uno a Uno):** Un registro se vincula con máximo uno del otro lado.\n` +
-      `• **1:N (Uno a Muchos):** La PK del lado \`1\` migra como **FK** al lado \`N\`.\n` +
-      `• **N:M (Muchos a Muchos):** En el modelo físico requiere una **tabla asociativa intermedia** con dos FKs.\n\n` +
-      `• **En tu diagrama (${model.relationships.length} relaciones):** ${
+      `Sobre las **cardinalidades**, **${shortName}**:\n` +
+      `• **\`1:1\`:** Un registro se relaciona con máximo uno del otro lado.\n` +
+      `• **\`1:N\`:** El lado \`1\` pasa su PK como **FK** al lado \`N\`.\n` +
+      `• **\`N:M\`:** Necesita una **tabla asociativa intermedia** con ambas FKs para poder llevarlo a SQL.\n\n` +
+      `En **${model.name}** tenemos ${model.relationships.length} relaciones: ${
         audit.nmRelationships.length > 0
-          ? `Actualmente tienes **${audit.nmRelationships.length} relación(es) N:M** (${audit.nmRelationships.map(n => `${n.source?.name} ↔ ${n.target?.name}`).join(', ')}). Como **${askingUser.role}**, ${config.mode === 'mentor' ? 'analiza qué atributos propios tendría la tabla intermedia.' : 'puedo generar esa tabla asociativa por ti.'}`
-          : 'Tus relaciones están estructuradas en `1:1` o `1:N`.'
+          ? `ojo con ${audit.nmRelationships.map(n => `\`${n.source?.name} ↔ ${n.target?.name}\``).join(', ')} que está en \`N:M\` directo y nos conviene descomponerla.`
+          : 'todas están limpias en `1:1` o `1:N`.'
       }`;
   } else if (
     normalizedPrompt.includes('uml') ||
@@ -1074,23 +1090,42 @@ export async function generateSeniorMentorReply(params: {
     normalizedPrompt.includes('fisico')
   ) {
     directTopicAnswer =
-      `🧩 **Vistas del Taller de Diseño (Conceptual, Lógico, Físico y Clases UML):**\n` +
-      `• **DER Conceptual:** Muestra entidades y relaciones del negocio sin detalles técnicos.\n` +
-      `• **DER Lógico:** Incorpora llaves primarias (\`PK\`), foráneas (\`FK\`) y cardinalidades normalizadas.\n` +
-      `• **DER Físico:** Muestra nombres de tablas SQL (\`tableName\`), tipos de datos PostgreSQL y nulabilidad.\n` +
-      `• **Clases UML:** Representa tus ${model.entities.length} entidades como clases POO con visibilidad, atributos y métodos para **${askingUser.role === 'Implementador' ? 'generar el código Spring Boot' : 'documentar la arquitectura'}**.`;
+      `Las vistas del taller te muestran el mismo modelo en 4 niveles, **${shortName}**:\n` +
+      `• **Conceptual:** Solo entidades y relaciones del negocio.\n` +
+      `• **Lógico:** Ya incluye \`PK\`, \`FK\` y cardinalidades normalizadas.\n` +
+      `• **Físico:** Nombres de tablas PostgreSQL, tipos de columna y \`NOT NULL\`.\n` +
+      `• **Clases UML:** Tus ${model.entities.length} entidades como clases POO listas para ${askingUser.role === 'Implementador' ? 'generar el proyecto Spring Boot' : 'revisar arquitectura'}.`;
+  } else if (mentionedEntities.length > 0) {
+    const ent = mentionedEntities[0];
+    const relsOfEnt = model.relationships
+      .filter(r => r.sourceEntityId === ent.id || r.targetEntityId === ent.id)
+      .map(r => {
+        const s = model.entities.find(e => e.id === r.sourceEntityId)?.name || '';
+        const t = model.entities.find(e => e.id === r.targetEntityId)?.name || '';
+        return `\`${s} (${r.cardinality}) → ${t}\``;
+      });
+    const recForEnt = missingAttributesAnalysis.recommendations.find(r => r.entity.id === ent.id);
+
+    directTopicAnswer =
+      `Viéndola en el lienzo, **${shortName}**, la clase **\`${ent.name}\`** (tabla \`${ent.tableName || ent.name.toLowerCase()}\`) tiene **${ent.attributes.length} atributos**: ${ent.attributes
+        .map(a => `\`${a.name}\`${a.isPrimaryKey ? ' (PK)' : a.isForeignKey ? ' (FK)' : ''}`)
+        .join(', ')}.\n\n` +
+      `• **Relaciones:** ${relsOfEnt.length > 0 ? relsOfEnt.join(', ') : 'Todavía está suelta sin relaciones conectadas.'}\n` +
+      (recForEnt
+        ? `• **Sugerencia rápida:** Yo le sumaría ${recForEnt.suggestedAttributes.map(s => `\`${s.attribute.name}\` (\`${s.attribute.type}\`)`).join(' y ')} para dejarla completa.`
+        : `• Estructuralmente se ve consistente para su rol en **${model.name}**.`);
   }
 
   if (directTopicAnswer) {
     const modeNote =
-      config.mode === 'mentor'
-        ? `\n\n🧭 **Pregunta de Mentoría para ${askingUser.name}:** Con base en esto, ¿qué ajuste revisarías en **${sampleEnt?.name || model.name}** desde tu rol de **${askingUser.role}**?`
+      config.mode === 'mentor' && !isGreeting
+        ? `\n\n¿Cómo lo ves tú desde **${askingUser.role}**, **${shortName}**?`
         : proposedChange
-        ? `\n\n✨ **Propuesta lista (${config.mode === 'solver' ? 'Modo Solucionador' : 'Modo Copiloto'}):** Detecté una mejora aplicable sobre tu diagrama (*${proposedChange.summary}*).`
+        ? `\n\n✨ *Si quieres, ya dejé lista la propuesta (${proposedChange.summary}) en el botón de abajo para aplicarla al diagrama.*`
         : '';
 
     return {
-      text: `${roleHeader}\n\n${directTopicAnswer}${modeNote}`,
+      text: `${directTopicAnswer}${modeNote}`,
       providerUsed: engineLabel,
       proposedChange: config.mode === 'mentor' ? undefined : proposedChange,
       codeSnippet,
@@ -1098,70 +1133,48 @@ export async function generateSeniorMentorReply(params: {
     };
   }
 
-  // 4.2 Análisis específico por rol PUDS cuando pide revisión/diagnóstico general del diagrama
+  // 4.2 Revisión general / código / diagnóstico del diagrama cuando el usuario pide opinión o revisión abierta
   const topFinding = audit.findings[0];
   let roleSpecificAnalysis = '';
 
   if (askingUser.role === 'Analista') {
-    roleSpecificAnalysis = `📋 **Diagnóstico de Dominio para ti, ${askingUser.name} (Analista):**\n` +
-      `1. **Cobertura del Negocio (${model.client || model.name}):** Actualmente modelamos ${model.entities.length} conceptos clave (${model.entities.map(e => `\`${e.name}\``).join(', ')}).\n` +
-      `2. **Trazabilidad de Reglas (DFs):** Tienes **${model.functionalDependencies?.length || 0} dependencias funcionales** declaradas. ${
-        selectedEntity
-          ? `En **${selectedEntity.name}**, el identificador \`${selectedEntity.attributes.find(a => a.isPrimaryKey)?.name || 'id'}\` determina funcionalmente a \`${selectedEntity.attributes.filter(a => !a.isPrimaryKey).map(a => a.name).join(', ')}\`.`
-          : ''
-      }\n` +
-      `3. **Oportunidad detectada en el dominio:** ${topFinding ? topFinding.detail : 'El alcance funcional básico está completo; podrías incorporar una entidad de Auditoría o Facturación para cerrar el ciclo transaccional.'}`;
+    roleSpecificAnalysis =
+      `Si lo revisamos desde negocio, **${shortName}**, en **${model.name}** ya cubrimos ${model.entities.map(e => `\`${e.name}\``).join(', ')} con **${model.functionalDependencies?.length || 0} dependencias funcionales**.\n\n` +
+      `${topFinding ? `Lo que sí mejoraría es esto: ${topFinding.detail}` : 'El dominio base se ve bien cubierto; si quieres refinar algo, dime qué clase o regla de negocio quieres validar.'}`;
   } else if (askingUser.role === 'Diseñador') {
-    roleSpecificAnalysis = `📐 **Diagnóstico Relacional & UML para ti, ${askingUser.name} (Diseñador):**\n` +
-      `1. **Estado de Normalización (1FN-BCNF):** ${
-        audit.entitiesWithoutPK.length === 0
-          ? 'Todas las entidades cumplen **1FN** con clave primaria definida.'
-          : `Atención: ${audit.entitiesWithoutPK.map(e => e.name).join(', ')} no tienen clave primaria.`
-      }\n` +
-      `2. **Cardinalidades y Claves Foráneas:** De las **${model.relationships.length} relaciones**, ${
+    roleSpecificAnalysis =
+      `A nivel de diseño relacional, **${shortName}**:\n` +
+      `• **PKs / 1FN:** ${audit.entitiesWithoutPK.length === 0 ? 'Todas las tablas tienen PK definida ✅.' : `Ojo: falta PK en ${audit.entitiesWithoutPK.map(e => e.name).join(', ')}.`}\n` +
+      `• **Relaciones y FKs:** ${
         audit.nmRelationships.length > 0
-          ? `detecté **${audit.nmRelationships.length} relación(es) N:M** (${audit.nmRelationships.map(n => `${n.source?.name} ↔ ${n.target?.name}`).join(', ')}) que deberíamos transformar en tabla asociativa.`
-          : 'todas las relaciones están en `1:1` o `1:N`.'
-      } ${
-        audit.missingFKEntities.length > 0
-          ? `Además, faltan **${audit.missingFKEntities.length} atributo(s) [FK]** explícitos en las tablas hijas.`
-          : 'Todas las tablas hijas cuentan con su atributo `[FK]`.'
-      }`;
+          ? `Hay ${audit.nmRelationships.length} relación(es) \`N:M\` (${audit.nmRelationships.map(n => `${n.source?.name} ↔ ${n.target?.name}`).join(', ')}) que conviene bajar a tabla asociativa.`
+          : 'Las cardinalidades `1:1` y `1:N` están limpias.'
+      } ${audit.missingFKEntities.length > 0 ? `Faltan ${audit.missingFKEntities.length} FKs explícitas en las tablas hijas.` : ''}`;
   } else if (askingUser.role === 'Implementador') {
     const targetEnt = selectedEntity || model.entities[0];
-    roleSpecificAnalysis = `💻 **Diagnóstico de Implementación Backend para ti, ${askingUser.name} (Implementador):**\n` +
-      `1. **Mapeo ORM (Spring Boot 3 + Hibernate):** Para las ${model.entities.length} tablas de **${model.name}**, ${
-        audit.nmRelationships.length > 0
-          ? `ten cuidado con la relación \`N:M\` en **${audit.nmRelationships[0].source?.name} ↔ ${audit.nmRelationships[0].target?.name}**: en lugar de usar \`@ManyToMany\` plano, te recomiendo mapear una entidad intermedia con \`@OneToMany\` para soportar columnas extra como fecha o subtotal.`
-          : `las relaciones \`1:N\` se mapean limpiamente con \`@ManyToOne(fetch = FetchType.LAZY)\` y \`@JoinColumn\`.`
-      }\n` +
-      `2. **Optimización PostgreSQL en ${targetEnt?.name || 'el esquema'}:** Te sugiero crear índices \`CREATE INDEX\` sobre las columnas foráneas (\`${
-        targetEnt?.attributes.filter(a => a.isForeignKey || a.isUnique).map(a => a.name).join(', ') || 'cliente_id, fecha'
-      }\`) para acelerar los \`JOIN\` en tus endpoints REST.`;
+    roleSpecificAnalysis =
+      `Pensando ya en el backend, **${shortName}**:\n` +
+      `• Para **${targetEnt?.name || 'las entidades'}**, el mapeo con Spring Boot JPA y PostgreSQL sale limpio con \`@ManyToOne(fetch = FetchType.LAZY)\` y te dejé abajo un avance de \`${targetEnt?.name || 'Entidad'}.java\`.\n` +
+      `• Acuérdate de indexar las FKs (\`${targetEnt?.attributes.filter(a => a.isForeignKey || a.isUnique).map(a => a.name).join(', ') || 'id'}\`) para no penalizar los \`JOIN\`.`;
   } else {
-    roleSpecificAnalysis = `🛡️ **Diagnóstico de Gobernanza y Calidad PUDS para ti, ${askingUser.name} (Administrador):**\n` +
-      `1. **Estado del Proyecto "${model.name}":** Fase actual **${model.status || 'Diseño'}** (Versión ${model.version}).\n` +
-      `2. **Sincronización del Equipo (${collaborators.length} activos):** ${collaborators.map(c => `${c.name} (${c.role})`).join(', ')} están trabajando sobre la misma sala.\n` +
-      `3. **Riesgos Técnicos antes de Producción:** ${
+    roleSpecificAnalysis =
+      `Echándole un vistazo general a **${model.name}** (fase **${model.status || 'Diseño'}**, v${model.version}), **${shortName}**:\n` +
+      `${
         audit.findings.length > 0
-          ? `Hay **${audit.findings.length} punto(s) de mejora** (${audit.findings.map(f => f.title).join('; ')}).`
-          : 'El modelo cumple con los estándares de calidad PUDS para pasar a generación de código.'
-      }`;
+          ? `Detecté ${audit.findings.length} punto(s) que vale la pena pulir: ${audit.findings.map(f => f.title).join('; ')}.`
+          : `Las ${model.entities.length} clases y ${model.relationships.length} relaciones están consistentes.`
+      }\n\nSi quieres que revise una clase puntual, atributos que falten, normalización o cómo quedaría en SQL/Java, pregúntame directo por esa parte.`;
   }
 
   let modeFooter = '';
-  if (config.mode === 'mentor') {
-    modeFooter = `\n\n🧭 **Pregunta de Mentoría para ${askingUser.name}:** ¿Cómo crees que deberíamos ajustar ${
-      selectedEntity ? `la entidad **${selectedEntity.name}**` : `el esquema de **${model.name}**`
-    } desde tu rol de **${askingUser.role}** para resolver este punto sin introducir redundancia? *(Modo Mentor activo: te guío sin alterar el diagrama automáticamente).*`;
-  } else if (config.mode === 'solver' && proposedChange) {
-    modeFooter = `\n\n⚡ **Acción Directa del Senior (Modo Solucionador):** Ya apliqué automáticamente la mejora sobre el diagrama (${proposedChange.summary}) para que tú y el equipo continúen sin bloqueos.`;
-  } else if (proposedChange) {
-    modeFooter = `\n\n✨ **Solución Lista (Modo Copiloto Senior):** He preparado la solución automática (*${proposedChange.summary}*). Puedes aplicarla al diagrama con el botón de abajo cuando estés de acuerdo.`;
+  if (config.mode === 'solver' && proposedChange) {
+    modeFooter = `\n\n⚡ Ya apliqué el ajuste directo al diagrama (${proposedChange.summary}) para que sigamos avanzando.`;
+  } else if (proposedChange && config.mode !== 'mentor') {
+    modeFooter = `\n\n✨ Ya te armé la solución (*${proposedChange.summary}*) abajo por si quieres aplicarla con un clic.`;
   }
 
   return {
-    text: `${roleHeader}\n\n${selectedContextLine}\n\n${roleSpecificAnalysis}${modeFooter}`,
+    text: `${roleSpecificAnalysis}${modeFooter}`,
     providerUsed: engineLabel,
     proposedChange: config.mode === 'mentor' ? undefined : proposedChange,
     codeSnippet,
