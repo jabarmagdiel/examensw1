@@ -20,6 +20,7 @@ import { ModuleSidebar, ActiveModule } from './components/Navigation/ModuleSideb
 import { ProjectManagerView } from './components/Projects/ProjectManagerView';
 import { UserManagerView } from './components/Users/UserManagerView';
 import { ReportsView } from './components/Reports/ReportsView';
+import { DocumentationView } from './components/Reports/DocumentationView';
 import { MappingView } from './components/Mapping/MappingView';
 import { DashboardView } from './components/Dashboard/DashboardView';
 import { MobileAppView } from './components/Mobile/MobileAppView';
@@ -926,6 +927,17 @@ export default function App() {
           <MobileAppView
             model={currentModel}
             onNavigate={setActiveModule}
+          />
+        ) : activeModule === 'docs' ? (
+          <DocumentationView
+            projects={projects}
+            users={users}
+            activeProjectId={activeProjectId}
+            onSelectProject={(id) => setActiveProjectId(id)}
+            onOpenDesignStudio={(id) => {
+              setActiveProjectId(id);
+              setActiveModule('canvas');
+            }}
           />
         ) : (
           <DiagramCanvas

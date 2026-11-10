@@ -153,6 +153,16 @@ export const ContextualAIAssistant: React.FC<ContextualAIAssistantProps> = ({
         { label: '📶 ¿Cómo funciona el modo Offline?', action: 'explain_offline' },
         { label: '⚡ ¿Cómo sincronizar con Spring Boot?', action: 'explain_mobile_sync' }
       ]
+    },
+    docs: {
+      name: 'Documentación PUDS & UML 2.5+',
+      icon: Layers,
+      color: '#6366f1',
+      greeting: `Estás en la Documentación Oficial publicada de la plataforma (Metodología PUDS completa, estándar OMG UML 2.5+, diccionario dinámico de ${model.entities.length} clases y arquitectura de IA Local).`,
+      quickPrompts: [
+        { label: '🎨 Abrir Lienzo UML 2.5', action: 'open_canvas' },
+        { label: '🛡️ Verificar Normalización', action: 'run_normalizer' }
+      ]
     }
   }[activeModule] || {
     name: 'Asistente Virtual CASE',

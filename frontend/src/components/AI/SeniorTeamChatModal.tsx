@@ -18,7 +18,9 @@ import {
   Maximize2,
   Minimize2,
   Trash2,
-  Eye
+  Eye,
+  Camera,
+  Image as ImageIcon
 } from 'lucide-react';
 import {
   DiagramModel,
@@ -33,6 +35,7 @@ import {
 } from '../../types/case';
 import {
   analyzeDiagramContext,
+  checkLocalOllamaStatus,
   generateSeniorMentorReply,
   getInitialTeamChat
 } from '../../services/seniorAiMentor';
@@ -125,29 +128,59 @@ export const SeniorTeamChatModal: React.FC<SeniorTeamChatModalProps> = ({
   onApplyChanges
 }) => {
   const [inputText, setInputText] = useState('');
+  const [attachedImage, setAttachedImage] = useState<string | null>(null);
   const [isAIThinking, setIsAIThinking] = useState(false);
   const [showConfigPanel, setShowConfigPanel] = useState(false);
   const [showContextInspector, setShowContextInspector] = useState(false);
   const [isExpanded, setIsExpanded] = useState(false);
   const [askSeniorDirectly, setAskSeniorDirectly] = useState(true);
+  const [ollamaStatus, setOllamaStatus] = useState<{ online: boolean; models: string[] } | null>(null);
   const messagesEndRef = useRef<HTMLDivElement | null>(null);
+  const chatImageInputRef = useRef<HTMLInputElement | null>(null);
 
   useEffect(() => {
     if (isOpen) {
       messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
+      checkLocalOllamaStatus(aiConfig.localEndpoint).then(setOllamaStatus);
     }
-  }, [messages, isOpen, isAIThinking]);
+  }, [messages, isOpen, isAIThinking, showConfigPanel]);
 
   if (!isOpen) return null;
 
   const selectedEntity = model.entities.find(e => e.id === selectedEntityId) || null;
   const audit = analyzeDiagramContext(model);
 
-  const triggerSeniorResponse = async (userPrompt: string, askingPerson: UserPresence, currentHistory: GroupChatMessage[]) => {
+  const handleAttachImageFile = (file: File) => {
+    const reader = new FileReader();
+    reader.onload = () => setAttachedImage(reader.result as string);
+    reader.readAsDataURL(file);
+  };
+
+  const handleChatPaste = (e: React.ClipboardEvent) => {
+    const items = e.clipboardData?.items;
+    if (!items) return;
+    for (let i = 0; i < items.length; i++) {
+      if (items[i].type.startsWith('image/')) {
+        const blob = items[i].getAsFile();
+        if (blob) {
+          handleAttachImageFile(blob);
+          break;
+        }
+      }
+    }
+  };
+
+  const triggerSeniorResponse = async (
+    userPrompt: string,
+    askingPerson: UserPresence,
+    currentHistory: GroupChatMessage[],
+    imageDataUrl?: string
+  ) => {
     setIsAIThinking(true);
     try {
       const reply = await generateSeniorMentorReply({
         prompt: userPrompt,
+        imageDataUrl,
         model,
         askingUser: askingPerson,
         collaborators,
@@ -196,9 +229,11 @@ export const SeniorTeamChatModal: React.FC<SeniorTeamChatModalProps> = ({
   };
 
   const handleSend = async (customText?: string, overrideUser?: UserPresence) => {
-    const text = (customText ?? inputText).trim();
-    if (!text || isAIThinking) return;
+    const rawText = (customText ?? inputText).trim();
+    const imgToSend = customText ? undefined : attachedImage || undefined;
+    if ((!rawText && !imgToSend) || isAIThinking) return;
 
+    const text = rawText || 'Analiza esta imagen del diagrama de clases UML y prepárala para exportarla al lienzo general.';
     const sender = overrideUser || currentUser;
 
     const userMsg: GroupChatMessage = {
@@ -210,14 +245,19 @@ export const SeniorTeamChatModal: React.FC<SeniorTeamChatModalProps> = ({
       senderRole: sender.role,
       senderColor: sender.color,
       text,
+      imageDataUrl: imgToSend,
       timestamp: Date.now()
     };
 
     onSendMessage(userMsg);
-    if (!customText) setInputText('');
+    if (!customText) {
+      setInputText('');
+      setAttachedImage(null);
+    }
 
     const updatedHistory = [...messages, userMsg];
     const shouldAIRespond =
+      Boolean(imgToSend) ||
       askSeniorDirectly ||
       aiConfig.autoIntervene ||
       text.toLowerCase().includes('@senior') ||
@@ -225,7 +265,7 @@ export const SeniorTeamChatModal: React.FC<SeniorTeamChatModalProps> = ({
       text.includes('?');
 
     if (shouldAIRespond) {
-      await triggerSeniorResponse(text, sender, updatedHistory);
+      await triggerSeniorResponse(text, sender, updatedHistory, imgToSend);
     }
   };
 
@@ -569,8 +609,8 @@ export const SeniorTeamChatModal: React.FC<SeniorTeamChatModalProps> = ({
           }}
         >
           <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-            <span style={{ fontSize: 11, fontWeight: 800, color: '#c084fc' }}>
-              ⚙️ Configuración de Motor IA (Google Gemini / Modelo Local Opcional)
+            <span style={{ fontSize: 11, fontWeight: 800, color: '#34d399' }}>
+              ⚙️ Motor de IA Local (Ollama / Motor PUDS Offline)
             </span>
             <button
               className="btn-secondary"
@@ -581,12 +621,12 @@ export const SeniorTeamChatModal: React.FC<SeniorTeamChatModalProps> = ({
             </button>
           </div>
 
-          {/* Selector de Proveedor */}
+          {/* Selector de Proveedor (IA Local primero) */}
           <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 6 }}>
             {[
-              { id: 'google_gemini', label: 'Google Gemini AI', sub: 'API Oficial Google' },
-              { id: 'local_llm', label: 'Modelo Local', sub: 'Ollama / LM Studio' },
-              { id: 'builtin_senior', label: 'Motor Senior PUDS', sub: 'Integrado Offline' }
+              { id: 'local_llm', label: 'IA Local (Ollama/PUDS)', sub: ollamaStatus?.online ? `● Ollama (${ollamaStatus.models.length} modelos)` : 'Local Offline Automático' },
+              { id: 'builtin_senior', label: 'Motor Local PUDS', sub: '100% Sin Internet/API' },
+              { id: 'google_gemini', label: 'Google Gemini AI', sub: 'Nube Opcional (API Key)' }
             ].map(p => {
               const active = aiConfig.provider === p.id;
               return (
@@ -596,25 +636,97 @@ export const SeniorTeamChatModal: React.FC<SeniorTeamChatModalProps> = ({
                   style={{
                     padding: '6px 8px',
                     borderRadius: 8,
-                    background: active ? 'rgba(99, 102, 241, 0.25)' : 'rgba(255,255,255,0.03)',
-                    border: `1px solid ${active ? '#818cf8' : 'var(--border-subtle)'}`,
+                    background: active ? 'rgba(16, 185, 129, 0.22)' : 'rgba(255,255,255,0.03)',
+                    border: `1px solid ${active ? '#34d399' : 'var(--border-subtle)'}`,
                     color: '#fff',
                     textAlign: 'left',
                     cursor: 'pointer'
                   }}
                 >
                   <div style={{ fontSize: 10, fontWeight: 700 }}>{p.label}</div>
-                  <div style={{ fontSize: 8, color: 'var(--text-muted)' }}>{p.sub}</div>
+                  <div style={{ fontSize: 8, color: active ? '#a7f3d0' : 'var(--text-muted)' }}>{p.sub}</div>
                 </button>
               );
             })}
           </div>
 
+          {aiConfig.provider === 'local_llm' && (
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+              <div style={{ display: 'grid', gridTemplateColumns: '1fr 130px', gap: 8 }}>
+                <div>
+                  <label style={{ fontSize: 9, color: 'var(--text-muted)', display: 'block', marginBottom: 3 }}>
+                    Endpoint Servidor Local (Ollama / LM Studio):
+                  </label>
+                  <input
+                    type="text"
+                    value={aiConfig.localEndpoint}
+                    onChange={e => onUpdateAIConfig({ ...aiConfig, localEndpoint: e.target.value })}
+                    placeholder="http://localhost:11434/api/chat"
+                    style={{
+                      width: '100%',
+                      padding: '5px 8px',
+                      fontSize: 11,
+                      borderRadius: 6,
+                      background: 'rgba(0,0,0,0.4)',
+                      border: '1px solid var(--border-subtle)',
+                      color: '#fff'
+                    }}
+                  />
+                </div>
+                <div>
+                  <label style={{ fontSize: 9, color: 'var(--text-muted)', display: 'block', marginBottom: 3 }}>
+                    Modelo Local:
+                  </label>
+                  {ollamaStatus?.online && ollamaStatus.models.length > 0 ? (
+                    <select
+                      value={aiConfig.localModel}
+                      onChange={e => onUpdateAIConfig({ ...aiConfig, localModel: e.target.value })}
+                      style={{
+                        width: '100%',
+                        padding: '5px 8px',
+                        fontSize: 11,
+                        borderRadius: 6,
+                        background: '#1e293b',
+                        border: '1px solid #34d399',
+                        color: '#fff'
+                      }}
+                    >
+                      {ollamaStatus.models.map(m => (
+                        <option key={m} value={m}>{m}</option>
+                      ))}
+                    </select>
+                  ) : (
+                    <input
+                      type="text"
+                      value={aiConfig.localModel}
+                      onChange={e => onUpdateAIConfig({ ...aiConfig, localModel: e.target.value })}
+                      placeholder="llama3.2"
+                      style={{
+                        width: '100%',
+                        padding: '5px 8px',
+                        fontSize: 11,
+                        borderRadius: 6,
+                        background: 'rgba(0,0,0,0.4)',
+                        border: '1px solid var(--border-subtle)',
+                        color: '#fff'
+                      }}
+                    />
+                  )}
+                </div>
+              </div>
+              <div style={{ fontSize: 9.5, color: ollamaStatus?.online ? '#34d399' : '#94a3b8' }}>
+                {ollamaStatus?.online
+                  ? `✅ Ollama local conectado (${ollamaStatus.models.join(', ') || 'listo'}).`
+                  : 'ℹ️ Si Ollama no está encendido, responde automáticamente el Motor IA Local PUDS integrado (sin APIs externas).'}
+              </div>
+            </div>
+          )}
+
           {aiConfig.provider === 'google_gemini' && (
             <div style={{ display: 'grid', gridTemplateColumns: '1fr 140px', gap: 8 }}>
               <div>
                 <label style={{ fontSize: 9, color: 'var(--text-muted)', display: 'block', marginBottom: 3 }}>
-                  Google Gemini API Key (opcional; usa fallback contextual si está vacía):
+                  Google Gemini API Key (opcional; usa Motor Local si está vacía):
                 </label>
                 <input
                   type="password"
@@ -653,51 +765,6 @@ export const SeniorTeamChatModal: React.FC<SeniorTeamChatModalProps> = ({
                   <option value="gemini-2.0-flash">gemini-2.0-flash</option>
                   <option value="gemini-1.5-pro">gemini-1.5-pro</option>
                 </select>
-              </div>
-            </div>
-          )}
-
-          {aiConfig.provider === 'local_llm' && (
-            <div style={{ display: 'grid', gridTemplateColumns: '1fr 130px', gap: 8 }}>
-              <div>
-                <label style={{ fontSize: 9, color: 'var(--text-muted)', display: 'block', marginBottom: 3 }}>
-                  Endpoint Modelo Local (Ollama / LM Studio):
-                </label>
-                <input
-                  type="text"
-                  value={aiConfig.localEndpoint}
-                  onChange={e => onUpdateAIConfig({ ...aiConfig, localEndpoint: e.target.value })}
-                  placeholder="http://localhost:11434/api/chat"
-                  style={{
-                    width: '100%',
-                    padding: '5px 8px',
-                    fontSize: 11,
-                    borderRadius: 6,
-                    background: 'rgba(0,0,0,0.4)',
-                    border: '1px solid var(--border-subtle)',
-                    color: '#fff'
-                  }}
-                />
-              </div>
-              <div>
-                <label style={{ fontSize: 9, color: 'var(--text-muted)', display: 'block', marginBottom: 3 }}>
-                  Modelo Local:
-                </label>
-                <input
-                  type="text"
-                  value={aiConfig.localModel}
-                  onChange={e => onUpdateAIConfig({ ...aiConfig, localModel: e.target.value })}
-                  placeholder="llama3.2"
-                  style={{
-                    width: '100%',
-                    padding: '5px 8px',
-                    fontSize: 11,
-                    borderRadius: 6,
-                    background: 'rgba(0,0,0,0.4)',
-                    border: '1px solid var(--border-subtle)',
-                    color: '#fff'
-                  }}
-                />
               </div>
             </div>
           )}
@@ -793,6 +860,15 @@ export const SeniorTeamChatModal: React.FC<SeniorTeamChatModalProps> = ({
                   color: '#f8fafc'
                 }}
               >
+                {msg.imageDataUrl && (
+                  <div style={{ marginBottom: 8 }}>
+                    <img
+                      src={msg.imageDataUrl}
+                      alt="Diagrama adjunto"
+                      style={{ maxWidth: '100%', maxHeight: 180, borderRadius: 8, border: '1px solid rgba(255,255,255,0.2)' }}
+                    />
+                  </div>
+                )}
                 {renderFormattedText(msg.text)}
 
                 {/* Snippet de Código Contextual si la IA lo incluye */}
@@ -993,6 +1069,7 @@ export const SeniorTeamChatModal: React.FC<SeniorTeamChatModalProps> = ({
 
       {/* FORMULARIO DE ENTRADA DEL CHAT GRUPAL */}
       <div
+        onPaste={handleChatPaste}
         style={{
           padding: 12,
           background: 'rgba(0, 0, 0, 0.55)',
@@ -1016,10 +1093,71 @@ export const SeniorTeamChatModal: React.FC<SeniorTeamChatModalProps> = ({
           </span>
         </div>
 
+        {attachedImage && (
+          <div style={{
+            display: 'flex',
+            alignItems: 'center',
+            gap: 10,
+            padding: '6px 10px',
+            borderRadius: 8,
+            background: 'rgba(16, 185, 129, 0.12)',
+            border: '1px solid rgba(16, 185, 129, 0.4)'
+          }}>
+            <img src={attachedImage} alt="Preview" style={{ width: 42, height: 32, objectFit: 'cover', borderRadius: 4 }} />
+            <span style={{ fontSize: 11, color: '#a7f3d0', flex: 1 }}>
+              Imagen de diagrama UML lista para digitalizar y exportar al lienzo general
+            </span>
+            <button
+              className="btn-icon"
+              onClick={() => setAttachedImage(null)}
+              title="Quitar imagen"
+              style={{ width: 22, height: 22 }}
+            >
+              <X size={12} />
+            </button>
+          </div>
+        )}
+
+        <input
+          ref={chatImageInputRef}
+          type="file"
+          accept="image/*"
+          style={{ display: 'none' }}
+          onChange={e => {
+            const f = e.target.files?.[0];
+            if (f) handleAttachImageFile(f);
+            e.target.value = '';
+          }}
+        />
+
         <div style={{ display: 'flex', gap: 8 }}>
+          <button
+            className="btn-secondary"
+            type="button"
+            onClick={() => chatImageInputRef.current?.click()}
+            title="Insertar o tomar foto de diagrama de clases para digitalizar con IA y exportarlo al lienzo"
+            style={{
+              padding: '0 10px',
+              borderRadius: 10,
+              borderColor: 'rgba(56, 189, 248, 0.45)',
+              color: '#38bdf8',
+              display: 'flex',
+              alignItems: 'center',
+              gap: 4,
+              fontSize: 11,
+              flexShrink: 0
+            }}
+          >
+            <Camera size={15} />
+            <span style={{ fontSize: 10, fontWeight: 700 }}>Foto UML</span>
+          </button>
           <input
             type="text"
-            placeholder={`Mensaje grupal como ${currentUser.name} (${currentUser.role})...`}
+            placeholder={
+              attachedImage
+                ? 'Opcional: escribe qué clases tiene o qué deseas editar en esta imagen...'
+                : `Mensaje grupal como ${currentUser.name} (${currentUser.role}) o pega imagen (Ctrl+V)...`
+            }
             value={inputText}
             onChange={e => setInputText(e.target.value)}
             onKeyDown={e => e.key === 'Enter' && handleSend()}

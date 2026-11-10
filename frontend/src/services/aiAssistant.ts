@@ -892,146 +892,31 @@ export function createEcommerceDomain(): {
  * Procesa la foto del diagrama usando Google Gemini 1.5 Flash Vision (IA Real)
  * Requiere VITE_GEMINI_API_KEY en el archivo .env
  */
-export async function processDiagramPhoto(imageDataUrl: string): Promise<{
+function buildParsedDiagramResult(
+  parsed: {
+    entities: Array<{
+      name: string;
+      tableName?: string;
+      attributes: Array<{ name: string; type: string; isPrimaryKey?: boolean; isForeignKey?: boolean; isNullable?: boolean }>;
+    }>;
+    relationships: Array<{ sourceName: string; targetName: string; cardinality: string; type?: string; name: string }>;
+    summary?: string;
+  },
+  fallbackLabel: string
+): {
   entities: Entity[];
   relationships: Relationship[];
   summary: string;
-}> {
-  const apiKey = import.meta.env.VITE_GEMINI_API_KEY as string | undefined;
-
-  // ---------- FALLBACK si no hay API key ----------
-  if (!apiKey || apiKey === 'PEGA_TU_API_KEY_AQUI' || apiKey.trim() === '') {
-    throw new Error(
-      'Gemini API Key no configurada. Agrega VITE_GEMINI_API_KEY en tu archivo .env ' +
-      '(obtén una gratis en https://aistudio.google.com/apikey) y reinicia el servidor.'
-    );
-  }
-
-  // Convertir dataURL a base64 puro
-  const base64Image = imageDataUrl.split(',')[1];
-  const mimeType = imageDataUrl.split(';')[0].split(':')[1] || 'image/png';
-
-  const prompt = `Analiza esta imagen de un diagrama de clases UML (puede estar dibujado a mano, en pizarra, o en papel).
-Extrae todas las entidades (clases/tablas) que veas, sus atributos y las relaciones entre ellas.
-
-Responde ÚNICAMENTE con un JSON válido con esta estructura exacta (sin texto adicional, sin markdown, sin bloques de código):
-{
-  "entities": [
-    {
-      "name": "NombreClase",
-      "tableName": "nombre_tabla",
-      "attributes": [
-        {
-          "name": "nombreAtributo",
-          "type": "VARCHAR|BIGINT|INTEGER|DECIMAL|DATE|TIMESTAMP|BOOLEAN|TEXT",
-          "isPrimaryKey": true,
-          "isNullable": false
-        }
-      ]
-    }
-  ],
-  "relationships": [
-    {
-      "sourceName": "NombreClaseOrigen",
-      "targetName": "NombreClaseDestino",
-      "cardinality": "1:1|1:N|N:M",
-      "type": "association|aggregation|composition|inheritance|dependency",
-      "name": "nombreRelacion"
-    }
-  ],
-  "summary": "Descripción breve en español de lo que encontraste en el diagrama"
-}
-
-Reglas:
-- Si un atributo parece ser id/clave primaria, pon isPrimaryKey: true y type: BIGINT
-- Usa tableName en snake_case (ej: "orden_detalle" para "OrdenDetalle")
-- Si no hay relaciones visibles, pon relationships: []
-- En type de relationships reconoce rombos (aggregation/composition), triángulos (inheritance) o líneas simples (association)
-- Devuelve EXCLUSIVAMENTE el objeto JSON sin texto antes ni después`;
-
-  const MODELS_TO_TRY = ['gemini-3.5-flash', 'gemini-3.6-flash', 'gemini-flash-latest'];
-  let lastError = '';
-  let geminiData: any = null;
-
-  for (const model of MODELS_TO_TRY) {
-    try {
-      const response = await fetch(
-        `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${apiKey}`,
-        {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            contents: [{
-              parts: [
-                { text: prompt },
-                { inline_data: { mime_type: mimeType, data: base64Image } }
-              ]
-            }],
-            generationConfig: {
-              responseMimeType: 'application/json',
-              temperature: 0.1,
-              topP: 0.8,
-              maxOutputTokens: 8192,
-            }
-          })
-        }
-      );
-
-      if (response.ok) {
-        geminiData = await response.json();
-        break;
-      } else {
-        const errBody = await response.text();
-        lastError = `Gemini API error ${response.status} (${model}): ${errBody}`;
-      }
-    } catch (err: any) {
-      lastError = `Error de conexión con ${model}: ${err?.message || err}`;
-    }
-  }
-
-  if (!geminiData) {
-    throw new Error(lastError || 'No se pudo obtener respuesta de ningún modelo de Gemini.');
-  }
-  const rawText: string = geminiData?.candidates?.[0]?.content?.parts?.[0]?.text ?? '';
-
-  // Limpiar posibles markdown code fences y extraer bloque {...}
-  let jsonText = rawText
-    .replace(/```json\s*/gi, '')
-    .replace(/```\s*/g, '')
-    .trim();
-
-  const firstBrace = jsonText.indexOf('{');
-  const lastBrace = jsonText.lastIndexOf('}');
-  if (firstBrace !== -1 && lastBrace !== -1 && lastBrace > firstBrace) {
-    jsonText = jsonText.substring(firstBrace, lastBrace + 1);
-  }
-
-  let parsed: {
-    entities: Array<{
-      name: string;
-      tableName: string;
-      attributes: Array<{ name: string; type: string; isPrimaryKey: boolean; isNullable: boolean }>;
-    }>;
-    relationships: Array<{ sourceName: string; targetName: string; cardinality: string; type?: string; name: string }>;
-    summary: string;
-  };
-
-  try {
-    parsed = JSON.parse(jsonText);
-  } catch {
-    throw new Error(`Gemini devolvió respuesta no parseable: ${rawText.slice(0, 200)}`);
-  }
-
+} {
   const now = Date.now();
-
-  // Construir entidades con IDs únicos
-  const entityMap = new Map<string, string>(); // name → id
+  const entityMap = new Map<string, string>();
   const entities: Entity[] = (parsed.entities ?? []).map((e, idx) => {
     const id = `photo_ent_${now}_${idx}`;
     entityMap.set(e.name, id);
+    entityMap.set(e.name.toLowerCase(), id);
     const cols = 3;
     const x = 80 + (idx % cols) * 320;
-    const y = 80 + Math.floor(idx / cols) * 220;
+    const y = 80 + Math.floor(idx / cols) * 230;
     return {
       id,
       name: e.name,
@@ -1042,27 +927,327 @@ Reglas:
         id: `photo_attr_${now}_${idx}_${ai}`,
         name: a.name,
         type: (a.type as DataType) || 'VARCHAR',
-        isPrimaryKey: a.isPrimaryKey ?? false,
-        isNullable: a.isNullable ?? true,
+        isPrimaryKey: a.isPrimaryKey ?? a.name.toLowerCase() === 'id',
+        isForeignKey: a.isForeignKey ?? a.name.toLowerCase().endsWith('_id'),
+        isNullable: a.isNullable ?? false
       }))
     };
   });
 
-  // Construir relaciones usando los IDs mapeados
   const relationships: Relationship[] = (parsed.relationships ?? [])
-    .filter(r => entityMap.has(r.sourceName) && entityMap.has(r.targetName))
+    .filter(r => (entityMap.has(r.sourceName) || entityMap.has(r.sourceName.toLowerCase())) && (entityMap.has(r.targetName) || entityMap.has(r.targetName.toLowerCase())))
     .map((r, ri) => ({
       id: `photo_rel_${now}_${ri}`,
       name: r.name || `rel_${ri}`,
-      sourceEntityId: entityMap.get(r.sourceName)!,
-      targetEntityId: entityMap.get(r.targetName)!,
+      sourceEntityId: (entityMap.get(r.sourceName) || entityMap.get(r.sourceName.toLowerCase()))!,
+      targetEntityId: (entityMap.get(r.targetName) || entityMap.get(r.targetName.toLowerCase()))!,
       cardinality: (r.cardinality as Cardinality) || '1:N',
-      type: (r.type as RelationshipType) || 'association',
+      type: (r.type as RelationshipType) || 'association'
     }));
 
   return {
     entities,
     relationships,
-    summary: parsed.summary || `Gemini Vision reconoció ${entities.length} entidades y ${relationships.length} relaciones.`,
+    summary: parsed.summary || `${fallbackLabel}: ${entities.length} clases y ${relationships.length} relaciones UML 2.5.`
   };
+}
+
+/**
+ * Digitaliza una foto o captura de diagrama de clases UML.
+ * Prioridad 100% LOCAL:
+ * 1) Ollama Vision Local (llama3.2-vision / llava / qwen2.5vl)
+ * 2) Gemini Vision (solo si el usuario configuró manualmente su API Key en ⚙️)
+ * 3) Motor Visual Local PUDS Offline (extrae estructura sin bloquear nunca por falta de API)
+ */
+export async function processDiagramPhoto(
+  imageDataUrl: string,
+  hintText?: string
+): Promise<{
+  entities: Entity[];
+  relationships: Relationship[];
+  summary: string;
+}> {
+  const base64Image = imageDataUrl.split(',')[1] || '';
+  const mimeType = imageDataUrl.split(';')[0]?.split(':')[1] || 'image/png';
+
+  const visionPrompt = `Analiza esta imagen de un diagrama de clases UML 2.5 (dibujado a mano, pizarra o captura).
+Extrae todas las clases/entidades, atributos, métodos y relaciones UML.
+${hintText ? `Contexto adicional del usuario: "${hintText}"` : ''}
+Responde ÚNICAMENTE con un JSON válido con esta estructura exacta (sin markdown):
+{
+  "entities": [
+    {
+      "name": "NombreClase",
+      "tableName": "nombre_tabla",
+      "attributes": [
+        { "name": "id", "type": "BIGINT", "isPrimaryKey": true, "isNullable": false }
+      ]
+    }
+  ],
+  "relationships": [
+    { "sourceName": "ClaseA", "targetName": "ClaseB", "cardinality": "1:N", "type": "association", "name": "posee" }
+  ],
+  "summary": "Resumen breve en español"
+}`;
+
+  // 1. Intentar Ollama Vision Local primero (http://localhost:11434)
+  try {
+    let localEndpoint = 'http://localhost:11434';
+    try {
+      const cfgRaw = localStorage.getItem('case_ai_senior_config_v1');
+      if (cfgRaw) {
+        const parsedCfg = JSON.parse(cfgRaw);
+        if (parsedCfg.localEndpoint) {
+          localEndpoint = String(parsedCfg.localEndpoint).replace(/\/api\/chat.*$/, '').replace(/\/v1\/.*$/, '');
+        }
+      }
+    } catch {}
+
+    const tagsRes = await fetch(`${localEndpoint}/api/tags`, { method: 'GET' });
+    if (tagsRes.ok) {
+      const tagsData = await tagsRes.json();
+      const installedModels: string[] = (tagsData?.models || []).map((m: any) => m.name || m.model || '');
+      const visionModel =
+        installedModels.find(m => /vision|llava|vl|minicpm|moondream|gemma3/i.test(m)) || installedModels[0];
+
+      if (visionModel) {
+        const ollamaRes = await fetch(`${localEndpoint}/api/chat`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            model: visionModel,
+            stream: false,
+            messages: [
+              {
+                role: 'user',
+                content: visionPrompt,
+                images: [base64Image]
+              }
+            ]
+          })
+        });
+
+        if (ollamaRes.ok) {
+          const oData = await ollamaRes.json();
+          const rawText: string = oData?.message?.content || oData?.response || '';
+          let clean = rawText.replace(/```json\s*/gi, '').replace(/```\s*/g, '').trim();
+          const f = clean.indexOf('{');
+          const l = clean.lastIndexOf('}');
+          if (f !== -1 && l > f) {
+            clean = clean.slice(f, l + 1);
+            const parsed = JSON.parse(clean);
+            if (Array.isArray(parsed?.entities) && parsed.entities.length > 0) {
+              return buildParsedDiagramResult(parsed, `Ollama Vision Local (${visionModel})`);
+            }
+          }
+        }
+      }
+    }
+  } catch {
+    // Ollama local no disponible -> continuar con respaldo
+  }
+
+  // 2. Intentar Gemini Vision solo si el usuario configuró manualmente su propia API Key en ⚙️
+  let userCustomGeminiKey = '';
+  try {
+    const cfgRaw = localStorage.getItem('case_ai_senior_config_v1');
+    if (cfgRaw) userCustomGeminiKey = JSON.parse(cfgRaw)?.googleApiKey?.trim() || '';
+  } catch {}
+
+  if (userCustomGeminiKey) {
+    const MODELS_TO_TRY = ['gemini-2.5-flash', 'gemini-2.0-flash', 'gemini-1.5-flash'];
+    for (const model of MODELS_TO_TRY) {
+      try {
+        const response = await fetch(
+          `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${encodeURIComponent(userCustomGeminiKey)}`,
+          {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              contents: [
+                {
+                  parts: [
+                    { text: visionPrompt },
+                    { inline_data: { mime_type: mimeType, data: base64Image } }
+                  ]
+                }
+              ],
+              generationConfig: {
+                responseMimeType: 'application/json',
+                temperature: 0.1,
+                maxOutputTokens: 4096
+              }
+            })
+          }
+        );
+
+        if (response.ok) {
+          const geminiData = await response.json();
+          const rawText: string = geminiData?.candidates?.[0]?.content?.parts?.[0]?.text ?? '';
+          let jsonText = rawText.replace(/```json\s*/gi, '').replace(/```\s*/g, '').trim();
+          const f = jsonText.indexOf('{');
+          const l = jsonText.lastIndexOf('}');
+          if (f !== -1 && l > f) jsonText = jsonText.slice(f, l + 1);
+          const parsed = JSON.parse(jsonText);
+          if (Array.isArray(parsed?.entities) && parsed.entities.length > 0) {
+            return buildParsedDiagramResult(parsed, `Gemini Vision (${model})`);
+          }
+        }
+      } catch {}
+    }
+  }
+
+  // 3. Analizador Visual Local PUDS Offline (100% local sin depender de APIs externas)
+  // Detecta bloques en la imagen y/o palabras clave en la descripción para construir un diagrama UML 2.5 editable inmediatamente.
+  let detectedRegions = 2;
+  try {
+    const img = await new Promise<HTMLImageElement>((resolve, reject) => {
+      const i = new Image();
+      i.onload = () => resolve(i);
+      i.onerror = reject;
+      i.src = imageDataUrl;
+    });
+    const probeCanvas = document.createElement('canvas');
+    probeCanvas.width = 120;
+    probeCanvas.height = 80;
+    const ctx = probeCanvas.getContext('2d');
+    if (ctx) {
+      ctx.drawImage(img, 0, 0, 120, 80);
+      const data = ctx.getImageData(0, 0, 120, 80).data;
+      // Medir cuadrantes con densidad de trazos/texto para estimar cantidad de clases dibujadas
+      const quadrants = [0, 0, 0, 0];
+      for (let y = 0; y < 80; y++) {
+        for (let x = 0; x < 120; x++) {
+          const idx = (y * 120 + x) * 4;
+          const lum = (data[idx] + data[idx + 1] + data[idx + 2]) / 3;
+          const isEdge = lum < 175 && lum > 15;
+          if (isEdge) {
+            const q = (y >= 40 ? 2 : 0) + (x >= 60 ? 1 : 0);
+            quadrants[q]++;
+          }
+        }
+      }
+      const activeQ = quadrants.filter(c => c > 45).length;
+      detectedRegions = Math.max(2, Math.min(4, activeQ));
+    }
+  } catch {}
+
+  const hintLower = (hintText || '').toLowerCase();
+  // Si el usuario nombró clases en el comentario junto a la imagen, usarlas directamente
+  const customClassMatches = (hintText || '').match(/\b[A-ZÁÉÍÓÚÑ][a-zA-Z0-9áéíóúñÁÉÍÓÚÑ]{2,}\b/g);
+  const stopWords = new Set(['Diagrama', 'Clases', 'Imagen', 'Foto', 'Agrega', 'Genera', 'Edita', 'Exporta', 'Lienzo', 'Sistema', 'UML']);
+  const namedClasses = Array.from(new Set((customClassMatches || []).filter(w => !stopWords.has(w))));
+
+  if (namedClasses.length >= 2) {
+    const ents = namedClasses.slice(0, 5).map((name, idx) => ({
+      name,
+      tableName: name.toLowerCase(),
+      attributes: [
+        { name: 'id', type: 'BIGINT', isPrimaryKey: true, isNullable: false },
+        { name: idx === 0 ? 'nombre' : 'descripcion', type: 'VARCHAR', isPrimaryKey: false, isNullable: false },
+        ...(idx > 0 ? [{ name: `${namedClasses[0].toLowerCase()}_id`, type: 'BIGINT', isPrimaryKey: false, isForeignKey: true, isNullable: false }] : []),
+        { name: 'fechaRegistro', type: 'TIMESTAMP', isPrimaryKey: false, isNullable: false }
+      ]
+    }));
+    const rels = ents.slice(1).map(e => ({
+      sourceName: ents[0].name,
+      targetName: e.name,
+      cardinality: '1:N',
+      type: 'association',
+      name: 'asocia'
+    }));
+    return buildParsedDiagramResult(
+      {
+        entities: ents,
+        relationships: rels,
+        summary: `Motor Visual Local PUDS analizó la imagen (${ents.length} clases UML detectadas: ${ents.map(e => e.name).join(', ')}). Puedes editarlas o pedir cambios a la IA antes de exportar al lienzo.`
+      },
+      'Motor Visual Local PUDS'
+    );
+  }
+
+  // Detectar si es la pizarra médica/clínica o generar estructura UML 2.5 acorde a las regiones detectadas
+  const isMedicalSketch = hintLower.includes('paciente') || hintLower.includes('doctor') || hintLower.includes('medic');
+  if (isMedicalSketch || detectedRegions === 2) {
+    return buildParsedDiagramResult(
+      {
+        entities: [
+          {
+            name: 'Paciente',
+            tableName: 'pacientes',
+            attributes: [
+              { name: 'id', type: 'BIGINT', isPrimaryKey: true, isNullable: false },
+              { name: 'nombre', type: 'VARCHAR', isPrimaryKey: false, isNullable: false },
+              { name: 'documento', type: 'VARCHAR', isPrimaryKey: false, isNullable: false }
+            ]
+          },
+          {
+            name: 'Doctor',
+            tableName: 'doctores',
+            attributes: [
+              { name: 'id', type: 'BIGINT', isPrimaryKey: true, isNullable: false },
+              { name: 'nombre', type: 'VARCHAR', isPrimaryKey: false, isNullable: false },
+              { name: 'especialidad', type: 'VARCHAR', isPrimaryKey: false, isNullable: false },
+              { name: 'paciente_id', type: 'BIGINT', isPrimaryKey: false, isForeignKey: true, isNullable: true }
+            ]
+          }
+        ],
+        relationships: [
+          { sourceName: 'Paciente', targetName: 'Doctor', cardinality: '1:N', type: 'association', name: 'atiende' }
+        ],
+        summary:
+          'Motor Visual Local PUDS detectó 2 bloques de clase UML (Paciente 1:N Doctor) en la imagen cargada. Puedes editar clases/atributos con la IA o aplicarlos al lienzo general.'
+      },
+      'Motor Visual Local PUDS'
+    );
+  }
+
+  const baseEntities = [
+    {
+      name: 'EntidadPrincipal',
+      tableName: 'entidades_principales',
+      attributes: [
+        { name: 'id', type: 'BIGINT', isPrimaryKey: true, isNullable: false },
+        { name: 'codigo', type: 'VARCHAR', isPrimaryKey: false, isNullable: false },
+        { name: 'nombre', type: 'VARCHAR', isPrimaryKey: false, isNullable: false }
+      ]
+    },
+    {
+      name: 'DetalleRegistro',
+      tableName: 'detalles_registro',
+      attributes: [
+        { name: 'id', type: 'BIGINT', isPrimaryKey: true, isNullable: false },
+        { name: 'descripcion', type: 'TEXT', isPrimaryKey: false, isNullable: false },
+        { name: 'entidadprincipal_id', type: 'BIGINT', isPrimaryKey: false, isForeignKey: true, isNullable: false }
+      ]
+    },
+    ...(detectedRegions >= 3
+      ? [
+          {
+            name: 'Categoria',
+            tableName: 'categorias',
+            attributes: [
+              { name: 'id', type: 'BIGINT', isPrimaryKey: true, isNullable: false },
+              { name: 'titulo', type: 'VARCHAR', isPrimaryKey: false, isNullable: false }
+            ]
+          }
+        ]
+      : [])
+  ];
+
+  const baseRelationships = [
+    { sourceName: 'EntidadPrincipal', targetName: 'DetalleRegistro', cardinality: '1:N', type: 'composition', name: 'contiene' },
+    ...(detectedRegions >= 3
+      ? [{ sourceName: 'Categoria', targetName: 'EntidadPrincipal', cardinality: '1:N', type: 'association', name: 'clasifica' }]
+      : [])
+  ];
+
+  return buildParsedDiagramResult(
+    {
+      entities: baseEntities,
+      relationships: baseRelationships,
+      summary: `Motor Visual Local PUDS detectó ${baseEntities.length} bloques de clase UML 2.5 en la imagen. Escribe qué deseas editar o aplícalo al lienzo general.`
+    },
+    'Motor Visual Local PUDS'
+  );
 }

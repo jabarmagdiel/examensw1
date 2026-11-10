@@ -1,6 +1,7 @@
 import React, { useState, useRef } from 'react';
-import { X, Camera, Upload, Sparkles, CheckCircle2, Image as ImageIcon } from 'lucide-react';
-import { processDiagramPhoto } from '../../services/aiAssistant';
+import { X, Camera, Upload, Sparkles, CheckCircle2, Image as ImageIcon, Wand2 } from 'lucide-react';
+import { executeVoiceCommand, processDiagramPhoto } from '../../services/aiAssistant';
+import { DiagramModel } from '../../types/case';
 
 interface DiagramPhotoScannerProps {
   isOpen: boolean;
@@ -19,18 +20,37 @@ export const DiagramPhotoScanner: React.FC<DiagramPhotoScannerProps> = ({
   const [isAnalyzing, setIsAnalyzing] = useState(false);
   const [scanResult, setScanResult] = useState<any | null>(null);
   const [scanError, setScanError] = useState<string | null>(null);
+  const [photoHint, setPhotoHint] = useState('');
+  const [editPrompt, setEditPrompt] = useState('');
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const cameraInputRef = useRef<HTMLInputElement>(null);
+
+  const loadImageFile = (file: File) => {
+    const reader = new FileReader();
+    reader.onload = () => {
+      setImagePreview(reader.result as string);
+      setScanResult(null);
+      setScanError(null);
+    };
+    reader.readAsDataURL(file);
+  };
 
   const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
-    if (file) {
-      const reader = new FileReader();
-      reader.onload = () => {
-        setImagePreview(reader.result as string);
-        setScanResult(null);
-        setScanError(null);
-      };
-      reader.readAsDataURL(file);
+    if (file) loadImageFile(file);
+  };
+
+  const handlePaste = (e: React.ClipboardEvent) => {
+    const items = e.clipboardData?.items;
+    if (!items) return;
+    for (let i = 0; i < items.length; i++) {
+      if (items[i].type.startsWith('image/')) {
+        const blob = items[i].getAsFile();
+        if (blob) {
+          loadImageFile(blob);
+          break;
+        }
+      }
     }
   };
 
@@ -39,13 +59,37 @@ export const DiagramPhotoScanner: React.FC<DiagramPhotoScannerProps> = ({
     setIsAnalyzing(true);
     setScanError(null);
     try {
-      const result = await processDiagramPhoto(imagePreview);
+      const result = await processDiagramPhoto(imagePreview, photoHint);
       setScanResult(result);
     } catch (err: any) {
       console.error('Error scanning photo:', err);
       setScanError(err?.message ?? 'Error desconocido al analizar la imagen.');
     } finally {
       setIsAnalyzing(false);
+    }
+  };
+
+  const handleEditScannedWithAI = () => {
+    if (!scanResult || !editPrompt.trim()) return;
+    const tempModel: DiagramModel = {
+      id: 'photo_temp',
+      name: 'Diagrama Escaneado',
+      entities: scanResult.entities,
+      relationships: scanResult.relationships,
+      functionalDependencies: [],
+      updatedAt: Date.now(),
+      version: 1
+    };
+    const res = executeVoiceCommand(editPrompt, tempModel);
+    if (res.actionType !== 'UNKNOWN') {
+      setScanResult({
+        entities: res.model.entities,
+        relationships: res.model.relationships,
+        summary: `${scanResult.summary} • Editado por IA: ${res.summary}`
+      });
+      setEditPrompt('');
+    } else {
+      setScanError('Prueba comandos como: "agregar atributo email a Paciente", "crear tabla Cita", o "relacionar Paciente con Doctor".');
     }
   };
 
@@ -91,36 +135,41 @@ export const DiagramPhotoScanner: React.FC<DiagramPhotoScannerProps> = ({
   };
 
   return (
-    <div style={{
-      position: 'fixed',
-      top: 0,
-      left: 0,
-      width: '100vw',
-      height: '100vh',
-      background: 'rgba(0, 0, 0, 0.75)',
-      backdropFilter: 'blur(8px)',
-      display: 'flex',
-      alignItems: 'center',
-      justifyContent: 'center',
-      zIndex: 1000,
-      padding: 20
-    }}>
+    <div
+      onPaste={handlePaste}
+      style={{
+        position: 'fixed',
+        top: 0,
+        left: 0,
+        width: '100vw',
+        height: '100vh',
+        background: 'rgba(0, 0, 0, 0.75)',
+        backdropFilter: 'blur(8px)',
+        display: 'flex',
+        alignItems: 'center',
+        justifyContent: 'center',
+        zIndex: 1000,
+        padding: 20
+      }}
+    >
       <div className="glass-panel" style={{
         width: '100%',
-        maxWidth: 580,
+        maxWidth: 620,
+        maxHeight: '90vh',
+        overflowY: 'auto',
         padding: 24,
         position: 'relative'
       }}>
         {/* Header */}
-        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 20, borderBottom: '1px solid var(--border-subtle)', paddingBottom: 14 }}>
+        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 16, borderBottom: '1px solid var(--border-subtle)', paddingBottom: 12 }}>
           <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
             <div style={{ background: 'var(--grad-primary)', width: 34, height: 34, borderRadius: 8, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
               <Camera size={18} color="#fff" />
             </div>
             <div>
-              <h2 style={{ fontSize: 16, fontWeight: 700, margin: 0 }}>Escanear Diagrama por Foto (Visión IA)</h2>
+              <h2 style={{ fontSize: 16, fontWeight: 700, margin: 0 }}>Foto a Diagrama UML 2.5 + Edición con IA Local</h2>
               <p style={{ fontSize: 11, color: 'var(--text-muted)', margin: 0 }}>
-                Carga una foto de un diagrama dibujado en pizarra o cuaderno para digitalizarlo automáticamente
+                Toma o sube una foto de un diagrama de clases para digitalizarlo, editarlo con IA y cargarlo al lienzo general
               </p>
             </div>
           </div>
@@ -131,39 +180,55 @@ export const DiagramPhotoScanner: React.FC<DiagramPhotoScannerProps> = ({
         <div style={{
           border: '2px dashed var(--border-subtle)',
           borderRadius: 12,
-          padding: 20,
+          padding: 18,
           textAlign: 'center',
-          marginBottom: 16,
+          marginBottom: 14,
           background: 'rgba(0, 0, 0, 0.2)'
         }}>
           {imagePreview ? (
-            <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center' }}>
+            <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 8 }}>
               <img
                 src={imagePreview}
                 alt="Diagrama preview"
-                style={{ maxWidth: '100%', maxHeight: 220, borderRadius: 8, marginBottom: 12 }}
+                style={{ maxWidth: '100%', maxHeight: 200, borderRadius: 8 }}
               />
-              <button
-                className="btn-secondary"
-                style={{ fontSize: 11 }}
-                onClick={() => fileInputRef.current?.click()}
-              >
-                Cambiar Imagen
-              </button>
+              <div style={{ display: 'flex', gap: 8 }}>
+                <button
+                  className="btn-secondary"
+                  style={{ fontSize: 11 }}
+                  onClick={() => fileInputRef.current?.click()}
+                >
+                  Cambiar Imagen
+                </button>
+                <button
+                  className="btn-secondary"
+                  style={{ fontSize: 11 }}
+                  onClick={() => cameraInputRef.current?.click()}
+                >
+                  <Camera size={12} /> Tomar Otra Foto
+                </button>
+              </div>
             </div>
           ) : (
             <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 10 }}>
-              <ImageIcon size={40} color="var(--text-muted)" />
-              <div style={{ fontSize: 13, color: 'var(--text-secondary)' }}>
-                Arrastra una imagen de un diagrama o haz clic para subir
+              <ImageIcon size={38} color="var(--text-muted)" />
+              <div style={{ fontSize: 12.5, color: 'var(--text-secondary)' }}>
+                Sube una imagen, toma una foto con cámara o pega una captura (Ctrl+V)
               </div>
-              <div style={{ display: 'flex', gap: 8 }}>
+              <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', justifyContent: 'center' }}>
                 <button
                   className="btn-primary"
                   style={{ fontSize: 12 }}
                   onClick={() => fileInputRef.current?.click()}
                 >
-                  <Upload size={14} /> Seleccionar Archivo
+                  <Upload size={14} /> Subir Imagen
+                </button>
+                <button
+                  className="btn-secondary"
+                  style={{ fontSize: 12, borderColor: '#10b981', color: '#34d399' }}
+                  onClick={() => cameraInputRef.current?.click()}
+                >
+                  <Camera size={14} /> Tomar Foto
                 </button>
                 <button
                   className="btn-secondary"
@@ -182,19 +247,44 @@ export const DiagramPhotoScanner: React.FC<DiagramPhotoScannerProps> = ({
             style={{ display: 'none' }}
             onChange={handleFileChange}
           />
+          <input
+            ref={cameraInputRef}
+            type="file"
+            accept="image/*"
+            capture="environment"
+            style={{ display: 'none' }}
+            onChange={handleFileChange}
+          />
         </div>
 
-        {/* Scan Actions */}
+        {/* Contexto opcional + Scan */}
         {imagePreview && !scanResult && (
-          <button
-            className="btn-primary"
-            style={{ width: '100%', padding: '10px 0', fontSize: 13 }}
-            onClick={handleScanImage}
-            disabled={isAnalyzing}
-          >
-            <Sparkles size={16} />
-            <span>{isAnalyzing ? 'Analizando con Gemini Vision IA...' : 'Digitalizar Diagrama con IA'}</span>
-          </button>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+            <input
+              type="text"
+              value={photoHint}
+              onChange={e => setPhotoHint(e.target.value)}
+              placeholder="Opcional: nombra las clases de tu foto si quieres guiar a la IA local (ej: Cliente Pedido Producto)"
+              style={{
+                width: '100%',
+                padding: '7px 10px',
+                borderRadius: 8,
+                fontSize: 11.5,
+                background: 'rgba(0,0,0,0.35)',
+                border: '1px solid var(--border-subtle)',
+                color: '#fff'
+              }}
+            />
+            <button
+              className="btn-primary"
+              style={{ width: '100%', padding: '10px 0', fontSize: 13 }}
+              onClick={handleScanImage}
+              disabled={isAnalyzing}
+            >
+              <Sparkles size={16} />
+              <span>{isAnalyzing ? 'Digitalizando con Visión IA Local...' : 'Digitalizar Diagrama con IA Local'}</span>
+            </button>
+          </div>
         )}
 
         {/* Error Panel */}
@@ -203,33 +293,71 @@ export const DiagramPhotoScanner: React.FC<DiagramPhotoScannerProps> = ({
             background: 'rgba(239, 68, 68, 0.12)',
             border: '1px solid rgba(239, 68, 68, 0.4)',
             borderRadius: 8,
-            padding: 14,
-            marginTop: 14,
+            padding: 12,
+            marginTop: 12,
             fontSize: 12,
             color: '#fca5a5',
-            lineHeight: 1.6
+            lineHeight: 1.5
           }}>
-            <strong style={{ display: 'block', marginBottom: 4, color: '#f87171' }}>⚠ Error al analizar la imagen:</strong>
+            <strong style={{ display: 'block', marginBottom: 4, color: '#f87171' }}>⚠ Aviso:</strong>
             {scanError}
           </div>
         )}
 
-        {/* Result Preview */}
+        {/* Result Preview + Edición mediante IA */}
         {scanResult && (
           <div style={{
             background: 'rgba(16, 185, 129, 0.1)',
             border: '1px solid rgba(16, 185, 129, 0.3)',
-            borderRadius: 8,
+            borderRadius: 10,
             padding: 14,
-            marginTop: 14
+            marginTop: 12,
+            display: 'flex',
+            flexDirection: 'column',
+            gap: 10
           }}>
-            <div style={{ display: 'flex', alignItems: 'center', gap: 8, color: '#34d399', fontWeight: 600, fontSize: 13, marginBottom: 6 }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 8, color: '#34d399', fontWeight: 700, fontSize: 13 }}>
               <CheckCircle2 size={16} />
-              <span>¡Diagrama Reconocido Exitosamente!</span>
+              <span>¡Diagrama Reconocido ({scanResult.entities?.length || 0} clases)!</span>
             </div>
-            <p style={{ fontSize: 12, color: '#f8fafc', marginBottom: 12 }}>
+            <p style={{ fontSize: 12, color: '#f8fafc', margin: 0 }}>
               {scanResult.summary}
             </p>
+            <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
+              {(scanResult.entities || []).map((ent: any) => (
+                <span key={ent.id} style={{ fontSize: 11, background: 'rgba(99, 102, 241, 0.2)', border: '1px solid rgba(99, 102, 241, 0.4)', color: '#c7d2fe', padding: '2px 8px', borderRadius: 6 }}>
+                  {ent.name} ({ent.attributes?.length || 0} atrib.)
+                </span>
+              ))}
+            </div>
+
+            {/* Edición rápida mediante IA antes de cargar al lienzo */}
+            <div style={{ display: 'flex', gap: 6 }}>
+              <input
+                type="text"
+                value={editPrompt}
+                onChange={e => setEditPrompt(e.target.value)}
+                onKeyDown={e => e.key === 'Enter' && handleEditScannedWithAI()}
+                placeholder="Editar con IA (ej: agregar atributo email a Paciente)..."
+                style={{
+                  flex: 1,
+                  padding: '6px 10px',
+                  borderRadius: 6,
+                  fontSize: 11.5,
+                  background: 'rgba(0,0,0,0.4)',
+                  border: '1px solid rgba(168, 85, 247, 0.4)',
+                  color: '#fff'
+                }}
+              />
+              <button
+                className="btn-secondary"
+                style={{ fontSize: 11, padding: '6px 10px', borderColor: '#a855f7', color: '#e9d5ff' }}
+                onClick={handleEditScannedWithAI}
+              >
+                <Wand2 size={12} /> Editar IA
+              </button>
+            </div>
+
             <button
               className="btn-primary"
               style={{ width: '100%', fontSize: 12 }}
@@ -238,7 +366,7 @@ export const DiagramPhotoScanner: React.FC<DiagramPhotoScannerProps> = ({
                 onClose();
               }}
             >
-              Cargar Entidades al Canvas
+              Exportar / Cargar Clases al Lienzo General
             </button>
           </div>
         )}

@@ -15,6 +15,7 @@ import {
 } from 'lucide-react';
 import { DiagramModel } from '../../types/case';
 import { 
+  exportToEnterpriseArchitectUML25,
   exportToEnterpriseArchitectXMI, 
   exportToEnterpriseArchitectXMI11,
   exportToArchiXML, 
@@ -37,13 +38,14 @@ export const ArchitectModal: React.FC<ArchitectModalProps> = ({
   if (!isOpen) return null;
 
   const [activeTab, setActiveTab] = useState<'export' | 'import'>('export');
-  const [selectedFormat, setSelectedFormat] = useState<'ea_xmi21' | 'ea_xmi11' | 'archi_xml'>('ea_xmi21');
+  const [selectedFormat, setSelectedFormat] = useState<'ea_uml25' | 'ea_xmi21' | 'ea_xmi11' | 'archi_xml'>('ea_uml25');
   const [importStatus, setImportStatus] = useState<{ success?: boolean; message?: string } | null>(null);
   const [copied, setCopied] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   // Contenido XML dinámico según el formato seleccionado
   const generatedContent = React.useMemo(() => {
+    if (selectedFormat === 'ea_uml25') return exportToEnterpriseArchitectUML25(model);
     if (selectedFormat === 'ea_xmi21') return exportToEnterpriseArchitectXMI(model);
     if (selectedFormat === 'ea_xmi11') return exportToEnterpriseArchitectXMI11(model);
     return exportToArchiXML(model);
@@ -51,9 +53,9 @@ export const ArchitectModal: React.FC<ArchitectModalProps> = ({
 
   const handleDownload = () => {
     let filename = `${model.name.toLowerCase().replace(/\s+/g, '_')}`;
-    let ext = selectedFormat === 'ea_xmi21' ? 'xmi' : 'xml';
 
-    if (selectedFormat === 'ea_xmi21') filename += '_sparx_ea_v21.xmi';
+    if (selectedFormat === 'ea_uml25') filename += '_sparx_ea_uml25.xmi';
+    else if (selectedFormat === 'ea_xmi21') filename += '_sparx_ea_v21.xmi';
     else if (selectedFormat === 'ea_xmi11') filename += '_sparx_ea_v11.xml';
     else filename += '_archi_exchange.xml';
 
@@ -90,39 +92,40 @@ export const ArchitectModal: React.FC<ArchitectModalProps> = ({
     reader.readAsText(file);
   };
 
-  // Cargar ejemplo de Enterprise Architect para pruebas inmediatas en 1 clic
+  // Cargar ejemplo de Enterprise Architect UML 2.5 para pruebas inmediatas en 1 clic
   const handleLoadEASample = () => {
     const sampleXMI = `<?xml version="1.0" encoding="UTF-8"?>
-<xmi:XMI xmi:version="2.1" xmlns:uml="http://schema.omg.org/spec/UML/2.1" xmlns:xmi="http://schema.omg.org/spec/XMI/2.1">
-  <uml:Model xmi:type="uml:Model" xmi:id="EA_Sample_Model" name="Sistema de Facturacion EA">
+<xmi:XMI xmi:version="2.5.1" xmlns:uml="http://www.omg.org/spec/UML/20131001" xmlns:xmi="http://www.omg.org/spec/XMI/20131001">
+  <uml:Model xmi:type="uml:Model" xmi:id="EA_Sample_Model" name="Sistema de Facturacion EA UML 2.5">
     <packagedElement xmi:type="uml:Package" xmi:id="EAPK_1" name="Facturacion">
       <packagedElement xmi:type="uml:Class" xmi:id="EAID_CLASE_1" name="Factura">
-        <ownedAttribute xmi:type="uml:Property" xmi:id="ATTR_1" name="id">
-          <type xmi:type="uml:PrimitiveType" href="http://schema.omg.org/spec/UML/2.1/uml.xml#Integer"/>
+        <ownedAttribute xmi:type="uml:Property" xmi:id="ATTR_1" name="id" isID="true">
+          <type xmi:type="uml:PrimitiveType" href="http://www.omg.org/spec/UML/20131001/PrimitiveTypes.xmi#Integer"/>
         </ownedAttribute>
-        <ownedAttribute xmi:type="uml:Property" xmi:id="ATTR_2" name="numeroFactura">
-          <type xmi:type="uml:PrimitiveType" href="http://schema.omg.org/spec/UML/2.1/uml.xml#String"/>
+        <ownedAttribute xmi:type="uml:Property" xmi:id="ATTR_2" name="numeroFactura" isUnique="true">
+          <type xmi:type="uml:PrimitiveType" href="http://www.omg.org/spec/UML/20131001/PrimitiveTypes.xmi#String"/>
         </ownedAttribute>
         <ownedAttribute xmi:type="uml:Property" xmi:id="ATTR_3" name="fechaEmision">
-          <type xmi:type="uml:PrimitiveType" href="http://schema.omg.org/spec/UML/2.1/uml.xml#DateTime"/>
+          <type xmi:type="uml:PrimitiveType" href="http://www.omg.org/spec/UML/20131001/PrimitiveTypes.xmi#DateTime"/>
         </ownedAttribute>
         <ownedAttribute xmi:type="uml:Property" xmi:id="ATTR_4" name="montoTotal">
-          <type xmi:type="uml:PrimitiveType" href="http://schema.omg.org/spec/UML/2.1/uml.xml#Real"/>
+          <type xmi:type="uml:PrimitiveType" href="http://www.omg.org/spec/UML/20131001/PrimitiveTypes.xmi#Real"/>
         </ownedAttribute>
+        <ownedOperation xmi:type="uml:Operation" xmi:id="OP_1" name="calcularTotal" visibility="public"/>
       </packagedElement>
       <packagedElement xmi:type="uml:Class" xmi:id="EAID_CLASE_2" name="DetalleFactura">
-        <ownedAttribute xmi:type="uml:Property" xmi:id="ATTR_5" name="id">
-          <type xmi:type="uml:PrimitiveType" href="http://schema.omg.org/spec/UML/2.1/uml.xml#Integer"/>
+        <ownedAttribute xmi:type="uml:Property" xmi:id="ATTR_5" name="id" isID="true">
+          <type xmi:type="uml:PrimitiveType" href="http://www.omg.org/spec/UML/20131001/PrimitiveTypes.xmi#Integer"/>
         </ownedAttribute>
         <ownedAttribute xmi:type="uml:Property" xmi:id="ATTR_6" name="cantidad">
-          <type xmi:type="uml:PrimitiveType" href="http://schema.omg.org/spec/UML/2.1/uml.xml#Integer"/>
+          <type xmi:type="uml:PrimitiveType" href="http://www.omg.org/spec/UML/20131001/PrimitiveTypes.xmi#Integer"/>
         </ownedAttribute>
         <ownedAttribute xmi:type="uml:Property" xmi:id="ATTR_7" name="precioUnitario">
-          <type xmi:type="uml:PrimitiveType" href="http://schema.omg.org/spec/UML/2.1/uml.xml#Real"/>
+          <type xmi:type="uml:PrimitiveType" href="http://www.omg.org/spec/UML/20131001/PrimitiveTypes.xmi#Real"/>
         </ownedAttribute>
       </packagedElement>
-      <packagedElement xmi:type="uml:Association" xmi:id="EAID_ASSOC_1" name="posee_detalles">
-        <ownedEnd xmi:type="uml:Property" xmi:id="END_1" type="EAID_CLASE_1"/>
+      <packagedElement xmi:type="uml:Association" xmi:id="EAID_ASSOC_1" name="compone">
+        <ownedEnd xmi:type="uml:Property" xmi:id="END_1" type="EAID_CLASE_1" aggregation="composite"/>
         <ownedEnd xmi:type="uml:Property" xmi:id="END_2" type="EAID_CLASE_2">
           <upperValue xmi:type="uml:LiteralUnlimitedNatural" value="*"/>
         </ownedEnd>
@@ -173,7 +176,7 @@ export const ArchitectModal: React.FC<ArchitectModalProps> = ({
                 Interoperabilidad con Enterprise Architect & Archi
               </h2>
               <p style={{ fontSize: 12, color: 'var(--text-muted)', margin: 0 }}>
-                Importación y exportación de diagramas y clases en formatos estándar XMI 2.1, XMI 1.1 y Archi Open Exchange
+                Importación y exportación de diagramas y clases UML 2.5 (XMI 2.5.1, XMI 2.1, XMI 1.1 y Archi Open Exchange)
               </p>
             </div>
           </div>
@@ -210,7 +213,26 @@ export const ArchitectModal: React.FC<ArchitectModalProps> = ({
               <label style={{ fontSize: 12, fontWeight: 600, color: '#94a3b8', marginBottom: 8, display: 'block' }}>
                 Selecciona el Formato Destino:
               </label>
-              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(230px, 1fr))', gap: 10 }}>
+              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))', gap: 10 }}>
+                <div
+                  onClick={() => setSelectedFormat('ea_uml25')}
+                  style={{
+                    padding: 12,
+                    borderRadius: 10,
+                    cursor: 'pointer',
+                    border: selectedFormat === 'ea_uml25' ? '2px solid #10b981' : '1px solid #334155',
+                    background: selectedFormat === 'ea_uml25' ? 'rgba(16, 185, 129, 0.15)' : '#1e293b'
+                  }}
+                >
+                  <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 4 }}>
+                    <strong style={{ fontSize: 13, color: '#f8fafc' }}>EA UML 2.5 (XMI 2.5.1)</strong>
+                    <span style={{ fontSize: 9, background: '#10b981', color: '#fff', padding: '1px 5px', borderRadius: 4, fontWeight: 700 }}>UML 2.5</span>
+                  </div>
+                  <p style={{ fontSize: 11, color: '#94a3b8', margin: 0 }}>
+                    Estándar OMG UML 2.5 completo (clases, métodos, agregación, composición, herencia y EA visual).
+                  </p>
+                </div>
+
                 <div
                   onClick={() => setSelectedFormat('ea_xmi21')}
                   style={{
@@ -223,10 +245,10 @@ export const ArchitectModal: React.FC<ArchitectModalProps> = ({
                 >
                   <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 4 }}>
                     <strong style={{ fontSize: 13, color: '#f8fafc' }}>Sparx EA XMI 2.1</strong>
-                    <span style={{ fontSize: 10, background: '#06b6d4', color: '#fff', padding: '1px 6px', borderRadius: 4, fontWeight: 700 }}>RECOMENDADO</span>
+                    <span style={{ fontSize: 9, background: '#06b6d4', color: '#fff', padding: '1px 5px', borderRadius: 4, fontWeight: 700 }}>CLÁSICO</span>
                   </div>
                   <p style={{ fontSize: 11, color: '#94a3b8', margin: 0 }}>
-                    XMI 2.1 con diagramas visuales y coordenadas de nodos embebidas para Sparx Enterprise Architect.
+                    XMI 2.1 con diagramas visuales y coordenadas embebidas para versiones previas de Enterprise Architect.
                   </p>
                 </div>
 
@@ -241,7 +263,7 @@ export const ArchitectModal: React.FC<ArchitectModalProps> = ({
                   }}
                 >
                   <strong style={{ fontSize: 13, color: '#f8fafc', display: 'block', marginBottom: 4 }}>
-                    Sparx EA XMI 1.1 Clásico
+                    Sparx EA XMI 1.1
                   </strong>
                   <p style={{ fontSize: 11, color: '#94a3b8', margin: 0 }}>
                     Formato clásico universal OMG UML 1.3 compatible con cualquier versión de Enterprise Architect.
@@ -272,7 +294,7 @@ export const ArchitectModal: React.FC<ArchitectModalProps> = ({
             <div>
               <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 6 }}>
                 <span style={{ fontSize: 12, color: '#94a3b8', fontWeight: 600 }}>
-                  Previsualización del Archivo ({selectedFormat === 'ea_xmi21' ? '.xmi' : '.xml'}):
+                  Previsualización del Archivo ({selectedFormat === 'ea_uml25' || selectedFormat === 'ea_xmi21' ? '.xmi' : '.xml'}):
                 </span>
                 <div style={{ display: 'flex', gap: 8 }}>
                   <button

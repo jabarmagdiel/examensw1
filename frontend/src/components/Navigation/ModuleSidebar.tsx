@@ -17,7 +17,8 @@ import {
   Table2,
   Smartphone,
   Database,
-  LogOut
+  LogOut,
+  BookOpen
 } from 'lucide-react';
 
 export type ActiveModule = 
@@ -27,6 +28,7 @@ export type ActiveModule =
   | 'reports' 
   | 'mapping'
   | 'mobile'
+  | 'docs'
   | 'canvas';
 
 interface ModuleSidebarProps {
@@ -105,6 +107,14 @@ export const ModuleSidebar: React.FC<ModuleSidebarProps> = ({
       color: '#10b981',
       badge: 'APK Android',
       desc: 'IA Local por voz offline/online'
+    },
+    {
+      id: 'docs' as ActiveModule,
+      label: '7. Documentación PUDS & UML',
+      icon: BookOpen,
+      color: '#6366f1',
+      badge: 'UML 2.5+',
+      desc: 'Metodología PUDS, UML 2.5 y Diccionario'
     }
   ];
 

@@ -8,14 +8,14 @@ import {
   SystemRole,
   UserPresence
 } from '../types/case';
-import { executeVoiceCommand } from './aiAssistant';
+import { executeVoiceCommand, processDiagramPhoto } from './aiAssistant';
 
 const SENIOR_CONFIG_KEY = 'case_ai_senior_config_v1';
 const GROUP_CHAT_STORAGE_KEY = 'case_ai_group_chat_v1';
 
 export const DEFAULT_SENIOR_AI_CONFIG: SeniorAIConfig = {
   mode: 'hybrid',
-  provider: 'google_gemini',
+  provider: 'local_llm',
   autoIntervene: true,
   googleApiKey: '',
   googleModel: 'gemini-2.5-flash',
@@ -28,9 +28,33 @@ export function loadSeniorAIConfig(): SeniorAIConfig {
   try {
     const raw = localStorage.getItem(SENIOR_CONFIG_KEY);
     if (!raw) return DEFAULT_SENIOR_AI_CONFIG;
-    return { ...DEFAULT_SENIOR_AI_CONFIG, ...JSON.parse(raw) };
+    const parsed = { ...DEFAULT_SENIOR_AI_CONFIG, ...JSON.parse(raw) };
+    // Priorizar siempre IA 100% Local salvo que el usuario haya ingresado explícitamente una API key externa
+    if (parsed.provider === 'google_gemini' && !parsed.googleApiKey?.trim()) {
+      parsed.provider = 'local_llm';
+    }
+    return parsed;
   } catch {
     return DEFAULT_SENIOR_AI_CONFIG;
+  }
+}
+
+export async function checkLocalOllamaStatus(endpoint = 'http://localhost:11434/api/chat'): Promise<{
+  online: boolean;
+  models: string[];
+}> {
+  try {
+    const base = endpoint.replace(/\/api\/chat.*$/, '').replace(/\/v1\/.*$/, '');
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), 1500);
+    const res = await fetch(`${base}/api/tags`, { signal: controller.signal });
+    clearTimeout(timer);
+    if (!res.ok) return { online: false, models: [] };
+    const data = await res.json();
+    const models: string[] = (data?.models || []).map((m: any) => m.name || m.model).filter(Boolean);
+    return { online: true, models };
+  } catch {
+    return { online: false, models: [] };
   }
 }
 
@@ -674,6 +698,7 @@ async function callLocalLLMAPI(
  */
 export async function generateSeniorMentorReply(params: {
   prompt: string;
+  imageDataUrl?: string;
   model: DiagramModel;
   askingUser: UserPresence;
   collaborators: UserPresence[];
@@ -695,11 +720,74 @@ export async function generateSeniorMentorReply(params: {
   };
   autoApply: boolean;
 }> {
-  const { prompt, model, askingUser, collaborators, selectedEntityId, config, recentMessages } = params;
+  const { prompt, imageDataUrl, model, askingUser, collaborators, selectedEntityId, config, recentMessages } = params;
   const selectedEntity = model.entities.find(e => e.id === selectedEntityId) || null;
   const audit = analyzeDiagramContext(model);
   const lower = prompt.toLowerCase();
   const normalizedPrompt = lower.normalize('NFD').replace(/[\u0300-\u036f]/g, '');
+  const shortName = askingUser.name.split(' ')[0] || askingUser.name;
+
+  // 0. Si el usuario adjuntó una imagen de un diagrama en el chat colaborativo, digitalizarlo (Ollama Vision Local / Motor Visual Local) y proponer exportarlo al lienzo general
+  if (imageDataUrl) {
+    const scanResult = await processDiagramPhoto(imageDataUrl, prompt);
+    let workingEntities = scanResult.entities;
+    let workingRels = scanResult.relationships;
+    let editNote = '';
+
+    // Si además escribió una instrucción de edición junto a la imagen (ej. "agrega atributo email a Paciente"), aplicarla de una vez
+    if (prompt.trim()) {
+      const tempDiagram: DiagramModel = {
+        ...model,
+        entities: workingEntities,
+        relationships: workingRels
+      };
+      const editAttempt = executeVoiceCommand(prompt, tempDiagram);
+      if (editAttempt.actionType !== 'UNKNOWN') {
+        workingEntities = editAttempt.model.entities;
+        workingRels = editAttempt.model.relationships;
+        editNote = `\n• **Edición IA aplicada:** ${editAttempt.summary}`;
+      }
+    }
+
+    // Fusionar o mantener las clases existentes del lienzo general evitando colisiones visuales
+    const offsetY = model.entities.length > 0 ? 320 : 0;
+    const shiftedEntities = workingEntities.map(e => ({ ...e, y: e.y + offsetY }));
+    const mergedEntities = [...model.entities, ...shiftedEntities];
+    const mergedRels = [...model.relationships, ...workingRels];
+
+    const replaceMode =
+      normalizedPrompt.includes('reemplaza') ||
+      normalizedPrompt.includes('nuevo lienzo') ||
+      normalizedPrompt.includes('solo este');
+
+    const finalEntities = replaceMode ? workingEntities : mergedEntities;
+    const finalRels = replaceMode ? workingRels : mergedRels;
+
+    const imageProposedChange = {
+      entities: finalEntities,
+      relationships: finalRels,
+      summary: `Exportar al lienzo general ${workingEntities.length} clases y ${workingRels.length} relaciones desde imagen UML`
+    };
+
+    const classListText = workingEntities
+      .map(e => `• **\`${e.name}\`**: ${e.attributes.map(a => `\`${a.name}\``).join(', ')}`)
+      .join('\n');
+
+    return {
+      text:
+        `Listo **${shortName}**, ya analicé la imagen del diagrama que enviaste al chat:\n\n` +
+        `${classListText}\n\n` +
+        `• **Relaciones detectadas:** ${workingRels.length}${editNote}\n\n` +
+        (config.mode === 'solver'
+          ? `⚡ Ya exporté automáticamente estas **${workingEntities.length} clases UML 2.5** al lienzo general.`
+          : `✨ Haz clic en **"Aplicar Solución del Senior al Diagrama"** abajo para exportar estas **${workingEntities.length} clases UML 2.5** directo al lienzo general (o dime qué atributo/relación quieres que edite antes).`),
+      providerUsed: scanResult.summary.includes('Ollama')
+        ? 'Ollama Vision Local'
+        : 'Motor Visual Local PUDS (100% Local)',
+      proposedChange: config.mode === 'mentor' ? undefined : imageProposedChange,
+      autoApply: config.mode === 'solver'
+    };
+  }
 
   // Detectar si el usuario menciona una o varias clases específicas en su pregunta
   const mentionedEntities = model.entities.filter(e => {
@@ -877,13 +965,11 @@ export async function generateSeniorMentorReply(params: {
 
   // 4. Respuesta del Motor Senior Contextual Integrado (Tono natural de compañero Senior del equipo)
   const engineLabel =
-    config.provider === 'google_gemini'
-      ? 'Motor Senior PUDS (Configura tu API Key Gemini en ⚙️ para LLM en la nube)'
-      : config.provider === 'local_llm'
-      ? `Motor Senior PUDS (Servidor local ${config.localModel} no detectado)`
-      : 'Motor Senior Contextual PUDS';
-
-  const shortName = askingUser.name.split(' ')[0] || askingUser.name;
+    config.provider === 'local_llm'
+      ? `IA Local PUDS (100% Local Offline • Ollama ${config.localModel} opcional)`
+      : config.provider === 'builtin_senior'
+      ? 'IA Local PUDS (100% Local Offline)'
+      : 'Motor Senior PUDS Local (Fallback)';
 
   // Si fue un comando directo sobre el diagrama
   if (directCommandResult.actionType !== 'UNKNOWN' && proposedChange) {

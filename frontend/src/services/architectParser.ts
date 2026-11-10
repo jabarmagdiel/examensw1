@@ -34,6 +34,185 @@ function mapUMLToDataType(umlType: string): DataType {
 }
 
 /**
+ * EXPORTAR 0 (RECOMENDADO): Genera XMI 2.5.1 estándar OMG UML 2.5 con extensiones Sparx Enterprise Architect
+ * Soporta clases, atributos, métodos, multiplicidades, agregación, composición, herencia, dependencia y realización.
+ */
+export function exportToEnterpriseArchitectUML25(diagram: DiagramModel): string {
+  const timestamp = new Date().toISOString();
+  const pkgId = `EAPK_${diagram.id.replace(/[^a-zA-Z0-9_]/g, '_')}`;
+
+  let xml = `<?xml version="1.0" encoding="UTF-8"?>
+<xmi:XMI xmlns:xmi="http://www.omg.org/spec/XMI/20131001" xmlns:uml="http://www.omg.org/spec/UML/20131001" xmlns:ea="http://www.sparxsystems.com/ea" xmi:version="2.5.1">
+  <xmi:Documentation exporter="CASE-AI Studio (Enterprise Architect UML 2.5)" exporterVersion="2.5.1"/>
+  <uml:Model xmi:type="uml:Model" xmi:id="EA_Model_UML25" name="${diagram.name || 'Modelo_UML25'}">
+    <packagedElement xmi:type="uml:Package" xmi:id="${pkgId}" name="${diagram.name || 'Modelo_PUDS'}">
+`;
+
+  // 1. Clases UML 2.5 (Atributos, Operaciones y Generalizaciones)
+  diagram.entities.forEach(entity => {
+    const classId = `EAID_${entity.id.replace(/[^a-zA-Z0-9_]/g, '_')}`;
+    xml += `      <packagedElement xmi:type="uml:Class" xmi:id="${classId}" name="${entity.name}" visibility="public">
+`;
+
+    entity.attributes.forEach(attr => {
+      const attrId = `EAID_ATTR_${attr.id.replace(/[^a-zA-Z0-9_]/g, '_')}`;
+      const umlType = mapDataTypeToUML(attr.type);
+      xml += `        <ownedAttribute xmi:type="uml:Property" xmi:id="${attrId}" name="${attr.name}" visibility="private" isUnique="${attr.isUnique ? 'true' : 'false'}" isID="${attr.isPrimaryKey ? 'true' : 'false'}">
+          <type xmi:type="uml:PrimitiveType" href="http://www.omg.org/spec/UML/20131001/PrimitiveTypes.xmi#${umlType}"/>
+          <lowerValue xmi:type="uml:LiteralInteger" xmi:id="EAID_LV_${attr.id.replace(/[^a-zA-Z0-9_]/g, '_')}" value="${attr.isNullable ? 0 : 1}"/>
+          <upperValue xmi:type="uml:LiteralUnlimitedNatural" xmi:id="EAID_UV_${attr.id.replace(/[^a-zA-Z0-9_]/g, '_')}" value="1"/>
+        </ownedAttribute>
+`;
+    });
+
+    const methodsToExport =
+      entity.methods && entity.methods.length > 0
+        ? entity.methods
+        : [
+            { id: `m_reg_${entity.id}`, name: 'registrar', returnType: 'Boolean', visibility: 'public' as const, parameters: [] },
+            { id: `m_upd_${entity.id}`, name: 'actualizar', returnType: 'void', visibility: 'public' as const, parameters: [] }
+          ];
+
+    methodsToExport.forEach(method => {
+      const methId = `EAID_OP_${method.id.replace(/[^a-zA-Z0-9_]/g, '_')}`;
+      xml += `        <ownedOperation xmi:type="uml:Operation" xmi:id="${methId}" name="${method.name}" visibility="${method.visibility || 'public'}">
+          <ownedParameter xmi:type="uml:Parameter" xmi:id="${methId}_ret" direction="return" name="return" type="${method.returnType || 'void'}"/>
+        </ownedOperation>
+`;
+    });
+
+    // Generalización UML 2.5 (Herencia donde entity es subclase del target)
+    diagram.relationships
+      .filter(r => r.type === 'inheritance' && r.sourceEntityId === entity.id)
+      .forEach((rel, idx) => {
+        const tgt = diagram.entities.find(e => e.id === rel.targetEntityId);
+        if (!tgt) return;
+        const tgtClassId = `EAID_${tgt.id.replace(/[^a-zA-Z0-9_]/g, '_')}`;
+        xml += `        <generalization xmi:type="uml:Generalization" xmi:id="EAID_GEN_${entity.id}_${idx}" general="${tgtClassId}"/>
+`;
+      });
+
+    xml += `      </packagedElement>
+`;
+  });
+
+  // 2. Asociaciones, Agregaciones, Composiciones, Dependencias y Realizaciones UML 2.5
+  diagram.relationships.forEach((rel, index) => {
+    const source = diagram.entities.find(e => e.id === rel.sourceEntityId);
+    const target = diagram.entities.find(e => e.id === rel.targetEntityId);
+    if (!source || !target) return;
+
+    const relType = rel.type || 'association';
+    if (relType === 'inheritance') return; // Ya emitida como <generalization> dentro de la subclase
+
+    const relId = `EAID_REL_${(rel.id || `rel_${index}`).replace(/[^a-zA-Z0-9_]/g, '_')}`;
+    const srcClassId = `EAID_${source.id.replace(/[^a-zA-Z0-9_]/g, '_')}`;
+    const tgtClassId = `EAID_${target.id.replace(/[^a-zA-Z0-9_]/g, '_')}`;
+
+    if (relType === 'dependency' || relType === 'realization') {
+      const xmiElemType = relType === 'realization' ? 'uml:Realization' : 'uml:Dependency';
+      xml += `      <packagedElement xmi:type="${xmiElemType}" xmi:id="${relId}" name="${rel.name || relType}" client="${srcClassId}" supplier="${tgtClassId}"/>
+`;
+      return;
+    }
+
+    const aggregationAttr =
+      relType === 'aggregation' ? ' aggregation="shared"' : relType === 'composition' ? ' aggregation="composite"' : '';
+
+    const sourceUpper = rel.cardinality === 'N:M' ? '*' : '1';
+    const targetUpper = rel.cardinality === '1:N' || rel.cardinality === 'N:M' ? '*' : '1';
+
+    xml += `      <packagedElement xmi:type="uml:Association" xmi:id="${relId}" name="${rel.name || `${source.name}_${target.name}`}">
+        <memberEnd xmi:idref="EAID_END_SRC_${index}"/>
+        <memberEnd xmi:idref="EAID_END_TGT_${index}"/>
+        <ownedEnd xmi:type="uml:Property" xmi:id="EAID_END_SRC_${index}" name="${source.name.toLowerCase()}" type="${srcClassId}"${aggregationAttr}>
+          <lowerValue xmi:type="uml:LiteralInteger" value="1"/>
+          <upperValue xmi:type="uml:LiteralUnlimitedNatural" value="${sourceUpper}"/>
+        </ownedEnd>
+        <ownedEnd xmi:type="uml:Property" xmi:id="EAID_END_TGT_${index}" name="${target.name.toLowerCase()}" type="${tgtClassId}">
+          <lowerValue xmi:type="uml:LiteralInteger" value="${rel.cardinality === '1:1' ? 1 : 0}"/>
+          <upperValue xmi:type="uml:LiteralUnlimitedNatural" value="${targetUpper}"/>
+        </ownedEnd>
+      </packagedElement>
+`;
+  });
+
+  xml += `    </packagedElement>
+  </uml:Model>
+  <xmi:Extension extender="Enterprise Architect" extenderID="6.5">
+    <elements>
+      <element xmi:idref="${pkgId}" xmi:type="uml:Package" name="${diagram.name || 'Modelo_PUDS'}" scope="public">
+        <model package2="EA_Model_UML25" ea_eleType="package"/>
+      </element>
+`;
+
+  diagram.entities.forEach((entity, idx) => {
+    const classId = `EAID_${entity.id.replace(/[^a-zA-Z0-9_]/g, '_')}`;
+    xml += `      <element xmi:idref="${classId}" xmi:type="uml:Class" name="${entity.name}" scope="public">
+        <model package="${pkgId}" ea_localid="${idx + 1}" ea_eleType="element"/>
+        <properties sType="Class" scope="public" stereotype="entity"/>
+      </element>
+`;
+  });
+
+  xml += `    </elements>
+    <connectors>
+`;
+
+  diagram.relationships.forEach((rel, index) => {
+    const source = diagram.entities.find(e => e.id === rel.sourceEntityId);
+    const target = diagram.entities.find(e => e.id === rel.targetEntityId);
+    if (!source || !target) return;
+
+    const relId = `EAID_REL_${(rel.id || `rel_${index}`).replace(/[^a-zA-Z0-9_]/g, '_')}`;
+    const srcClassId = `EAID_${source.id.replace(/[^a-zA-Z0-9_]/g, '_')}`;
+    const tgtClassId = `EAID_${target.id.replace(/[^a-zA-Z0-9_]/g, '_')}`;
+    const relType = rel.type || 'association';
+    const eaType =
+      relType === 'inheritance'
+        ? 'Generalisation'
+        : relType === 'dependency'
+        ? 'Dependency'
+        : relType === 'realization'
+        ? 'Realisation'
+        : relType === 'aggregation' || relType === 'composition'
+        ? 'Aggregation'
+        : 'Association';
+
+    xml += `      <connector xmi:idref="${relId}">
+        <source xmi:idref="${srcClassId}"><type multiplicity="${rel.cardinality === 'N:M' ? '0..*' : '1'}"/></source>
+        <target xmi:idref="${tgtClassId}"><type multiplicity="${rel.cardinality === '1:N' || rel.cardinality === 'N:M' ? '0..*' : '1'}"/></target>
+        <properties ea_type="${eaType}" subtype="${relType === 'composition' ? 'Strong' : relType === 'aggregation' ? 'Weak' : ''}"/>
+      </connector>
+`;
+  });
+
+  xml += `    </connectors>
+    <diagrams>
+      <diagram xmi:id="EAID_DIAG_${diagram.id.replace(/[^a-zA-Z0-9_]/g, '_')}">
+        <properties name="${diagram.name || 'Diagrama_Clases_UML25'}" type="Logical"/>
+        <project author="CASE-AI Studio" version="2.5" created="${timestamp}" modified="${timestamp}"/>
+        <elements>
+`;
+
+  diagram.entities.forEach((entity, idx) => {
+    const classId = `EAID_${entity.id.replace(/[^a-zA-Z0-9_]/g, '_')}`;
+    const left = Math.round(entity.x || 80 + (idx % 3) * 260);
+    const top = Math.round(entity.y || 80 + Math.floor(idx / 3) * 220);
+    xml += `          <element subject="${classId}" seq="${idx + 1}" geometry="Left=${left};Top=${top};Right=${left + 220};Bottom=${top + 170};"/>
+`;
+  });
+
+  xml += `        </elements>
+      </diagram>
+    </diagrams>
+  </xmi:Extension>
+</xmi:XMI>`;
+
+  return xml;
+}
+
+/**
  * EXPORTAR 1: Genera XMI 2.1 estándar de UML con extensiones nativas de Enterprise Architect (Sparx Systems)
  * Incluye la sección <xmi:Extension extender="Enterprise Architect"> con coordenadas y diagrama visual.
  */
@@ -453,13 +632,21 @@ function parseEnterpriseArchitectRecursive(root: any): { success: boolean; model
       const attrName = attrNode['@_name'];
       const typeRef = attrNode['type'] ? (attrNode['type']['@_href'] || attrNode['type']['@_name'] || '') : (attrNode['properties']?.['@_type'] || '');
       const dataType = mapUMLToDataType(typeRef || attrName);
+      const isPK =
+        attrNode['@_isID'] === 'true' ||
+        (idx === 0 && (attrName.toLowerCase() === 'id' || attrName.toLowerCase().endsWith('id'))) ||
+        attrName.toLowerCase() === 'id';
+      const isFK = !isPK && attrName.toLowerCase().endsWith('_id');
+      const isNullable = attrNode['lowerValue']?.['@_value'] === '0' || attrNode['bounds']?.['@_lower'] === '0';
 
       attributes.push({
         id: `attr_${Math.random().toString(36).substr(2, 9)}`,
         name: attrName,
         type: dataType,
-        isPrimaryKey: idx === 0 || attrName.toLowerCase() === 'id' || attrName.toLowerCase().endsWith('_id'),
-        isNullable: false
+        isPrimaryKey: isPK,
+        isForeignKey: isFK,
+        isUnique: attrNode['@_isUnique'] === 'true',
+        isNullable
       });
     });
 
@@ -473,6 +660,27 @@ function parseEnterpriseArchitectRecursive(root: any): { success: boolean; model
       });
     }
 
+    // Extraer operaciones / métodos UML 2.5
+    let rawOps = classNode['ownedOperation'] || [];
+    if (!Array.isArray(rawOps)) rawOps = [rawOps];
+    const methods = rawOps
+      .filter((op: any) => op && op['@_name'])
+      .map((op: any) => {
+        const retParam = Array.isArray(op['ownedParameter'])
+          ? op['ownedParameter'].find((p: any) => p['@_direction'] === 'return')
+          : op['ownedParameter'];
+        return {
+          id: `meth_${Math.random().toString(36).substr(2, 9)}`,
+          name: op['@_name'],
+          returnType: retParam?.['@_type'] || 'void',
+          visibility: (op['@_visibility'] === 'private' || op['@_visibility'] === 'protected' ? op['@_visibility'] : 'public') as
+            | 'public'
+            | 'private'
+            | 'protected',
+          parameters: []
+        };
+      });
+
     const geom = diagramGeometryMap.get(originalId);
     const xPos = geom ? geom.x : 80 + (gridCol % 3) * 320;
     const yPos = geom ? geom.y : 80 + gridRow * 260;
@@ -483,14 +691,37 @@ function parseEnterpriseArchitectRecursive(root: any): { success: boolean; model
       tableName: (classNode['@_name']).toLowerCase() + 's',
       x: xPos,
       y: yPos,
-      attributes
+      attributes,
+      methods: methods.length > 0 ? methods : undefined
     });
 
     gridCol++;
     if (gridCol % 3 === 0) gridRow++;
   });
 
-  // Buscar relaciones y asociaciones
+  // Extraer Generalizaciones (<generalization>) dentro de cada clase UML 2.5
+  classNodeMap.forEach((classNode, originalId) => {
+    const srcId = entityIdMap.get(originalId);
+    if (!srcId || !classNode['generalization']) return;
+    let gens = classNode['generalization'];
+    if (!Array.isArray(gens)) gens = [gens];
+    gens.forEach((g: any) => {
+      const tgtRef = g['@_general'];
+      const tgtId = entityIdMap.get(tgtRef);
+      if (tgtId) {
+        relationships.push({
+          id: `rel_${Math.random().toString(36).substr(2, 9)}`,
+          name: 'hereda',
+          sourceEntityId: srcId,
+          targetEntityId: tgtId,
+          cardinality: '1:1',
+          type: 'inheritance'
+        });
+      }
+    });
+  });
+
+  // Buscar relaciones, asociaciones, dependencias y realizaciones UML 2.5 / 2.1
   function findAssociations(node: any) {
     if (!node || typeof node !== 'object') return;
 
@@ -508,19 +739,41 @@ function parseEnterpriseArchitectRecursive(root: any): { success: boolean; model
         if (srcId && tgtId) {
           const tgtUpper = ownedEnds[1]?.['upperValue']?.['@_value'] || '1';
           const srcUpper = ownedEnds[0]?.['upperValue']?.['@_value'] || '1';
+          const aggAttr = ownedEnds[0]?.['@_aggregation'] || ownedEnds[1]?.['@_aggregation'] || '';
 
           let cardinality: Cardinality = '1:N';
           if (srcUpper === '*' && tgtUpper === '*') cardinality = 'N:M';
           else if (srcUpper === '1' && tgtUpper === '1') cardinality = '1:1';
+
+          const relType =
+            aggAttr === 'composite'
+              ? 'composition'
+              : aggAttr === 'shared'
+              ? 'aggregation'
+              : 'association';
 
           relationships.push({
             id: `rel_${Math.random().toString(36).substr(2, 9)}`,
             name: node['@_name'] || '',
             sourceEntityId: srcId,
             targetEntityId: tgtId,
-            cardinality
+            cardinality,
+            type: relType
           });
         }
+      }
+    } else if (type === 'uml:Dependency' || type === 'uml:Realization' || type === 'uml:InterfaceRealization') {
+      const srcId = entityIdMap.get(node['@_client']);
+      const tgtId = entityIdMap.get(node['@_supplier']);
+      if (srcId && tgtId) {
+        relationships.push({
+          id: `rel_${Math.random().toString(36).substr(2, 9)}`,
+          name: node['@_name'] || (type.includes('Realization') ? 'realiza' : 'depende'),
+          sourceEntityId: srcId,
+          targetEntityId: tgtId,
+          cardinality: '1:1',
+          type: type.includes('Realization') ? 'realization' : 'dependency'
+        });
       }
     }
 

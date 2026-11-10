@@ -562,13 +562,43 @@ export const DiagramCanvas: React.FC<DiagramCanvasProps> = ({
             const tgt = model.entities.find(e => e.id === rel.targetEntityId);
             if (!src || !tgt) return null;
 
-            const x1 = src.x + BOX_WIDTH / 2;
-            const y1 = src.y + BOX_HEIGHT / 2;
-            const x2 = tgt.x + BOX_WIDTH / 2;
-            const y2 = tgt.y + BOX_HEIGHT / 2;
+            const srcW = BOX_WIDTH;
+            const srcH = Math.max(BOX_HEIGHT, 64 + src.attributes.length * 24 + (viewMode === 'uml' ? 46 : 0));
+            const tgtW = BOX_WIDTH;
+            const tgtH = Math.max(BOX_HEIGHT, 64 + tgt.attributes.length * 24 + (viewMode === 'uml' ? 46 : 0));
+
+            const cx1 = src.x + srcW / 2;
+            const cy1 = src.y + srcH / 2;
+            const cx2 = tgt.x + tgtW / 2;
+            const cy2 = tgt.y + tgtH / 2;
+
+            const dx = cx2 - cx1;
+            const dy = cy2 - cy1;
+
+            const clipToBorder = (cx: number, cy: number, w: number, h: number, vx: number, vy: number) => {
+              if (Math.abs(vx) < 0.001 && Math.abs(vy) < 0.001) return { x: cx, y: cy };
+              const hw = w / 2 + 4;
+              const hh = h / 2 + 4;
+              const tx = Math.abs(vx) > 0.001 ? hw / Math.abs(vx) : Infinity;
+              const ty = Math.abs(vy) > 0.001 ? hh / Math.abs(vy) : Infinity;
+              const t = Math.min(tx, ty);
+              return { x: cx + vx * t, y: cy + vy * t };
+            };
+
+            const p1 = clipToBorder(cx1, cy1, srcW, srcH, dx, dy);
+            const p2 = clipToBorder(cx2, cy2, tgtW, tgtH, -dx, -dy);
+
+            const x1 = p1.x;
+            const y1 = p1.y;
+            const x2 = p2.x;
+            const y2 = p2.y;
 
             const midX = (x1 + x2) / 2;
             const midY = (y1 + y2) / 2;
+
+            const len = Math.hypot(x2 - x1, y2 - y1) || 1;
+            const ux = (x2 - x1) / len;
+            const uy = (y2 - y1) / len;
 
             const relType = rel.type || 'association';
             const isDashed = relType === 'dependency' || relType === 'realization' || (relType === 'association' && rel.cardinality === 'N:M');
@@ -603,9 +633,13 @@ export const DiagramCanvas: React.FC<DiagramCanvasProps> = ({
               relType === 'dependency' ? 'Dependencia' :
               relType === 'realization' ? 'Realización' : rel.cardinality;
 
+            const srcMult = rel.cardinality === 'N:M' ? '0..*' : '1';
+            const tgtMult = rel.cardinality === '1:1' ? '1' : '0..*';
+            const showMultiplicity = relType === 'association' || relType === 'aggregation' || relType === 'composition';
+
             return (
               <g key={rel.id}>
-                {/* Línea de conexión con marcadores UML */}
+                {/* Línea de conexión con marcadores UML 2.5 visibles en los bordes */}
                 <line
                   x1={x1}
                   y1={y1}
@@ -619,15 +653,43 @@ export const DiagramCanvas: React.FC<DiagramCanvasProps> = ({
                   opacity="0.95"
                 />
 
+                {/* Multiplicidades oficiales UML 2.5 en extremos */}
+                {viewMode === 'uml' && showMultiplicity && (
+                  <>
+                    <text
+                      x={x1 + ux * 20 - uy * 12}
+                      y={y1 + uy * 20 + ux * 12}
+                      fill="#e2e8f0"
+                      fontSize="11"
+                      fontWeight="800"
+                      textAnchor="middle"
+                      fontFamily="var(--font-mono)"
+                    >
+                      {srcMult}
+                    </text>
+                    <text
+                      x={x2 - ux * 20 - uy * 12}
+                      y={y2 - uy * 20 + ux * 12}
+                      fill="#e2e8f0"
+                      fontSize="11"
+                      fontWeight="800"
+                      textAnchor="middle"
+                      fontFamily="var(--font-mono)"
+                    >
+                      {tgtMult}
+                    </text>
+                  </>
+                )}
+
                 {/* Badge en el centro de la línea (Clickeable para editar o eliminar) */}
                 <g
                   style={{ pointerEvents: 'all', cursor: 'pointer' }}
                   onClick={() => handleEditRelationship(rel)}
                 >
                   <rect
-                    x={midX - 60}
+                    x={midX - 64}
                     y={midY - 14}
-                    width="120"
+                    width="128"
                     height="28"
                     rx="8"
                     fill="#0b1329"

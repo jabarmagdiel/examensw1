@@ -179,6 +179,7 @@ export interface GroupChatMessage {
   targetUserName?: string;
   targetUserRole?: SystemRole;
   text: string;
+  imageDataUrl?: string;
   timestamp: number;
   aiMetadata?: {
     mode: SeniorAIMode;

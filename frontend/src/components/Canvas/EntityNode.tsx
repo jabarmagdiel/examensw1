@@ -92,8 +92,8 @@ export const EntityNode: React.FC<EntityNodeProps> = ({
             </div>
           )}
           {viewMode === 'uml' && !isConnectingSource && (
-            <div style={{ fontSize: 9, color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.05em' }}>
-              &laquo;Entity&raquo;
+            <div style={{ fontSize: 9, color: '#a5b4fc', textTransform: 'lowercase', letterSpacing: '0.06em', fontWeight: 700 }}>
+              &laquo;class / entity&raquo;
             </div>
           )}
           <span style={{ color: 'var(--text-primary)' }}>{entity.name}</span>
@@ -138,48 +138,106 @@ export const EntityNode: React.FC<EntityNodeProps> = ({
         </div>
       </div>
 
-      {/* Attributes List */}
+      {/* Attributes List (Compartimento 2 UML 2.5 en vista UML) */}
       <div className="entity-body">
-        {entity.attributes.map(attr => (
-          <div key={attr.id} className="attribute-row">
-            <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-              {attr.isPrimaryKey && (
-                <span className="badge badge-pk" title="Clave Primaria (PK)">
-                  <Key size={10} style={{ marginRight: 2 }} /> PK
-                </span>
-              )}
-              {attr.isForeignKey && (
-                <span className="badge badge-fk" title="Clave Foránea (FK)">
-                  FK
-                </span>
-              )}
-              <span style={{
-                color: attr.isPrimaryKey ? '#fbbf24' : 'var(--text-primary)',
-                fontWeight: attr.isPrimaryKey ? 600 : 400
-              }}>
-                {attr.name}
-              </span>
-            </div>
+        {entity.attributes.map(attr => {
+          const umlPropTags = [
+            attr.isPrimaryKey ? 'id' : null,
+            attr.isForeignKey ? 'FK' : null,
+            attr.isUnique ? 'unique' : null
+          ].filter(Boolean);
+          const umlMultiplicity = attr.isNullable ? ' [0..1]' : '';
 
-            {viewMode !== 'conceptual' && (
-              <span style={{ color: 'var(--text-muted)', fontSize: 11 }}>
-                {viewMode === 'physical' && attr.length
-                  ? `${attr.type}(${attr.length})`
-                  : attr.type}
-                {attr.isNullable && ' ?'}
-              </span>
-            )}
-          </div>
-        ))}
-
-        {/* Métodos en modo UML */}
-        {viewMode === 'uml' && entity.methods && entity.methods.length > 0 && (
-          <div style={{ borderTop: '1px solid var(--border-subtle)', marginTop: 6, paddingTop: 6 }}>
-            {entity.methods.map(m => (
-              <div key={m.id} style={{ color: 'var(--text-secondary)', fontSize: 11, padding: '2px 4px' }}>
-                + {m.name}(): {m.returnType}
+          if (viewMode === 'uml') {
+            return (
+              <div
+                key={attr.id}
+                className="attribute-row"
+                style={{ fontFamily: 'var(--font-mono)', fontSize: 11, gap: 6 }}
+              >
+                <div style={{ display: 'flex', alignItems: 'center', gap: 4, minWidth: 0, overflow: 'hidden' }}>
+                  <span style={{ color: '#94a3b8', fontWeight: 700 }}>-</span>
+                  <span
+                    style={{
+                      color: attr.isPrimaryKey ? '#fbbf24' : attr.isForeignKey ? '#38bdf8' : 'var(--text-primary)',
+                      fontWeight: attr.isPrimaryKey ? 700 : 500,
+                      textDecoration: attr.isPrimaryKey ? 'underline' : 'none'
+                    }}
+                  >
+                    {attr.name}
+                  </span>
+                  <span style={{ color: 'var(--text-muted)' }}>:</span>
+                  <span style={{ color: '#a5b4fc' }}>
+                    {attr.type}
+                    {attr.length ? `(${attr.length})` : ''}
+                    {umlMultiplicity}
+                  </span>
+                </div>
+                {umlPropTags.length > 0 && (
+                  <span style={{ color: attr.isPrimaryKey ? '#fbbf24' : '#34d399', fontSize: 9, flexShrink: 0 }}>
+                    {`{${umlPropTags.join(', ')}}`}
+                  </span>
+                )}
               </div>
-            ))}
+            );
+          }
+
+          return (
+            <div key={attr.id} className="attribute-row">
+              <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                {attr.isPrimaryKey && (
+                  <span className="badge badge-pk" title="Clave Primaria (PK)">
+                    <Key size={10} style={{ marginRight: 2 }} /> PK
+                  </span>
+                )}
+                {attr.isForeignKey && (
+                  <span className="badge badge-fk" title="Clave Foránea (FK)">
+                    FK
+                  </span>
+                )}
+                <span style={{
+                  color: attr.isPrimaryKey ? '#fbbf24' : 'var(--text-primary)',
+                  fontWeight: attr.isPrimaryKey ? 600 : 400
+                }}>
+                  {attr.name}
+                </span>
+              </div>
+
+              {viewMode !== 'conceptual' && (
+                <span style={{ color: 'var(--text-muted)', fontSize: 11 }}>
+                  {viewMode === 'physical' && attr.length
+                    ? `${attr.type}(${attr.length})`
+                    : attr.type}
+                  {attr.isNullable && ' ?'}
+                </span>
+              )}
+            </div>
+          );
+        })}
+
+        {/* Compartimento 3 UML 2.5: Operaciones / Métodos */}
+        {viewMode === 'uml' && (
+          <div style={{ borderTop: '1px solid var(--border-subtle)', marginTop: 6, paddingTop: 6, fontFamily: 'var(--font-mono)' }}>
+            {entity.methods && entity.methods.length > 0 ? (
+              entity.methods.map(m => {
+                const visSymbol = m.visibility === 'private' ? '-' : m.visibility === 'protected' ? '#' : '+';
+                const paramsStr = (m.parameters || []).join(', ');
+                return (
+                  <div key={m.id} style={{ color: 'var(--text-secondary)', fontSize: 11, padding: '2px 4px' }}>
+                    <span style={{ color: '#34d399', fontWeight: 700 }}>{visSymbol}</span> {m.name}({paramsStr}) : <span style={{ color: '#c084fc' }}>{m.returnType}</span>
+                  </div>
+                );
+              })
+            ) : (
+              <>
+                <div style={{ color: 'var(--text-secondary)', fontSize: 10.5, padding: '1px 4px' }}>
+                  <span style={{ color: '#34d399', fontWeight: 700 }}>+</span> registrar() : <span style={{ color: '#c084fc' }}>Boolean</span>
+                </div>
+                <div style={{ color: 'var(--text-secondary)', fontSize: 10.5, padding: '1px 4px' }}>
+                  <span style={{ color: '#34d399', fontWeight: 700 }}>+</span> actualizar() : <span style={{ color: '#c084fc' }}>void</span>
+                </div>
+              </>
+            )}
           </div>
         )}
       </div>
