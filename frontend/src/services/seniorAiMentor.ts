@@ -649,6 +649,155 @@ export function buildCombinedStructuralFix(
 }
 
 /**
+ * Aplica un objeto patch JSON estructurado sobre las entidades y relaciones del modelo
+ */
+function applyPatchJsonObject(
+  patch: any,
+  model: DiagramModel
+): { entities: Entity[]; relationships: Relationship[]; summary: string } | undefined {
+  if (!patch || typeof patch !== 'object') return undefined;
+
+  let entities = model.entities.map(e => ({ ...e, attributes: [...e.attributes] }));
+  let relationships = [...model.relationships];
+  let changed = false;
+
+  if (Array.isArray(patch.deleteEntities) && patch.deleteEntities.length > 0) {
+    const delNames = new Set(patch.deleteEntities.map((n: any) => String(n).toLowerCase().trim()));
+    const before = entities.length;
+    const delIds = new Set(entities.filter(e => delNames.has(e.name.toLowerCase())).map(e => e.id));
+    entities = entities.filter(e => !delIds.has(e.id));
+    relationships = relationships.filter(r => !delIds.has(r.sourceEntityId) && !delIds.has(r.targetEntityId));
+    if (entities.length !== before) changed = true;
+  }
+
+  const rawAddEntities = Array.isArray(patch.addEntities)
+    ? patch.addEntities
+    : Array.isArray(patch.entities)
+    ? patch.entities
+    : [];
+
+  if (rawAddEntities.length > 0) {
+    rawAddEntities.forEach((ne: any, idx: number) => {
+      const rawName = String(ne?.name || '').trim();
+      if (!rawName || entities.some(e => e.name.toLowerCase() === rawName.toLowerCase())) return;
+      const attrs: Attribute[] =
+        Array.isArray(ne.attributes) && ne.attributes.length > 0
+          ? ne.attributes.map((a: any, ai: number) => ({
+              id: `at_llm_${Date.now()}_${idx}_${ai}`,
+              name: String(a.name || `campo_${ai}`).trim(),
+              type: (String(a.type || a.dataType || 'VARCHAR').toUpperCase() || 'VARCHAR') as Attribute['type'],
+              isPrimaryKey: Boolean(a.isPrimaryKey) || String(a.name || '').toLowerCase() === 'id',
+              isForeignKey: Boolean(a.isForeignKey) || String(a.name || '').toLowerCase().endsWith('_id'),
+              isNullable: Boolean(a.isNullable)
+            }))
+          : [
+              { id: `at_llm_${Date.now()}_${idx}_pk`, name: 'id', type: 'BIGINT', isPrimaryKey: true, isNullable: false },
+              { id: `at_llm_${Date.now()}_${idx}_nom`, name: 'estado', type: 'VARCHAR', length: 40, isPrimaryKey: false, isNullable: false }
+            ];
+
+      if (!attrs.some(a => a.isPrimaryKey)) {
+        attrs.unshift({ id: `at_llm_${Date.now()}_${idx}_pk`, name: 'id', type: 'BIGINT', isPrimaryKey: true, isNullable: false });
+      }
+
+      entities.push({
+        id: `ent_llm_${Date.now()}_${idx}`,
+        name: rawName,
+        tableName: String(ne.tableName || rawName.toLowerCase()),
+        x: 120 + ((entities.length + idx) % 3) * 310,
+        y: 120 + Math.floor((entities.length + idx) / 3) * 240,
+        attributes: attrs
+      });
+      changed = true;
+    });
+  }
+
+  if (Array.isArray(patch.addAttributes)) {
+    patch.addAttributes.forEach((item: any, idx: number) => {
+      const targetName = String(item?.entityName || item?.entity || '').toLowerCase().trim();
+      const target = entities.find(e => e.name.toLowerCase() === targetName);
+      const attrObj = item?.attribute || item;
+      const attrName = String(attrObj?.name || '').trim();
+      if (!target || !attrName) return;
+      if (target.attributes.some(a => a.name.toLowerCase() === attrName.toLowerCase())) return;
+      target.attributes.push({
+        id: `at_llm_add_${Date.now()}_${idx}`,
+        name: attrName,
+        type: (String(attrObj.type || attrObj.dataType || 'VARCHAR').toUpperCase() || 'VARCHAR') as Attribute['type'],
+        isPrimaryKey: Boolean(attrObj.isPrimaryKey),
+        isForeignKey: Boolean(attrObj.isForeignKey) || attrName.toLowerCase().endsWith('_id'),
+        isNullable: Boolean(attrObj.isNullable)
+      });
+      changed = true;
+    });
+  }
+
+  if (Array.isArray(patch.deleteAttributes)) {
+    patch.deleteAttributes.forEach((item: any) => {
+      const targetName = String(item?.entityName || item?.entity || '').toLowerCase().trim();
+      const target = entities.find(e => e.name.toLowerCase() === targetName);
+      const attrName = String(item?.name || '').toLowerCase().trim();
+      if (!target || !attrName) return;
+      const before = target.attributes.length;
+      target.attributes = target.attributes.filter(a => a.name.toLowerCase() !== attrName);
+      if (target.attributes.length !== before) changed = true;
+    });
+  }
+
+  const rawAddRels = Array.isArray(patch.addRelationships)
+    ? patch.addRelationships
+    : Array.isArray(patch.relationships)
+    ? patch.relationships
+    : [];
+
+  if (rawAddRels.length > 0) {
+    rawAddRels.forEach((rel: any, idx: number) => {
+      const srcName = String(rel?.source || rel?.from || '').toLowerCase().trim();
+      const tgtName = String(rel?.target || rel?.to || '').toLowerCase().trim();
+      const src = entities.find(e => e.name.toLowerCase() === srcName);
+      const tgt = entities.find(e => e.name.toLowerCase() === tgtName);
+      if (!src || !tgt || src.id === tgt.id) return;
+      const alreadyExists = relationships.some(
+        r =>
+          (r.sourceEntityId === src.id && r.targetEntityId === tgt.id) ||
+          (r.sourceEntityId === tgt.id && r.targetEntityId === src.id)
+      );
+      if (alreadyExists) return;
+
+      const card = (['1:1', '1:N', 'N:M'].includes(rel.cardinality) ? rel.cardinality : '1:N') as Relationship['cardinality'];
+      const fkName = `${src.name.toLowerCase()}_id`;
+      if ((card === '1:N' || card === '1:1') && !tgt.attributes.some(a => a.name.toLowerCase() === fkName)) {
+        tgt.attributes.push({
+          id: `fk_llm_${Date.now()}_${idx}`,
+          name: fkName,
+          type: 'BIGINT',
+          isPrimaryKey: false,
+          isForeignKey: true,
+          isNullable: false
+        });
+      }
+
+      relationships.push({
+        id: `rel_llm_${Date.now()}_${idx}`,
+        name: rel.name || 'asocia',
+        sourceEntityId: src.id,
+        targetEntityId: tgt.id,
+        cardinality: card,
+        type: rel.type || 'association',
+        foreignKeyAttributeName: card !== 'N:M' ? fkName : undefined
+      });
+      changed = true;
+    });
+  }
+
+  if (!changed) return undefined;
+  return {
+    entities,
+    relationships,
+    summary: patch.summary || 'Cambios aplicados al diagrama por Senior AI'
+  };
+}
+
+/**
  * Extrae y aplica parches JSON opcionales emitidos por un LLM (Ollama / Gemini)
  */
 function extractAndApplyLLMPatch(
@@ -660,54 +809,35 @@ function extractAndApplyLLMPatch(
 } {
   const match = rawText.match(/<DIAGRAM_PATCH>([\s\S]*?)<\/DIAGRAM_PATCH>/i);
   if (!match) {
-    // Red de seguridad: si el LLM local afirmó en texto que agregó/creó una clase nueva sin emitir <DIAGRAM_PATCH>, sintetizarla automáticamente
+    // Red de seguridad sobre texto natural (por si el LLM describió la clase/relación creada sin incluir <DIAGRAM_PATCH>)
     const claimedEntityMatch = rawText.match(
-      /(?:clase|entidad|tabla)\s+(?:\*\*|`)?([A-ZÁÉÍÓÚÑ][a-zA-Z0-9_]{2,})(?:\*\*|`)?\s+(?:se\s+ha\s+agregado|ha\s+sido\s+(?:agregada|creada)|fue\s+(?:agregada|creada)|agregada\s+al)/i
+      /(?:voy\s+a\s+agregar\s+la\s+clase|nueva\s+clase\s*:\s*|clase\s+(?:\*\*|`)?([A-ZÁÉÍÓÚÑ][a-zA-Z0-9_]{2,})(?:\*\*|`)?\s+(?:se\s+ha\s+agregado|ha\s+sido\s+(?:agregada|creada)|fue\s+(?:agregada|creada)))\s*(?:\*\*|`)?([A-ZÁÉÍÓÚÑ][a-zA-Z0-9_]{2,})?/i
     );
+    const nuevaClaseLineMatch = rawText.match(/Nueva\s+clase\s*:\s*(?:\*\*|`)?([A-ZÁÉÍÓÚÑ][a-zA-Z0-9_]{2,})/i);
+    const voyAgregarMatch = rawText.match(/voy\s+a\s+(?:agregar|crear|añadir)\s+(?:la\s+|una\s+)?(?:clase|entidad|tabla)\s+(?:\*\*|`)?([A-ZÁÉÍÓÚÑ][a-zA-Z0-9_]{2,})/i);
     const definedEntityMatch = rawText.match(
       /^[-•*]\s*([A-ZÁÉÍÓÚÑ][a-zA-Z0-9_]{2,})\s*\(tabla:\s*([a-zA-Z0-9_]+)\)\s*:\s*\[([^\]]+)\]/m
     );
-    const candidateName = claimedEntityMatch?.[1] || definedEntityMatch?.[1];
+    const candidateName =
+      nuevaClaseLineMatch?.[1] ||
+      voyAgregarMatch?.[1] ||
+      claimedEntityMatch?.[1] ||
+      claimedEntityMatch?.[2] ||
+      definedEntityMatch?.[1];
+
     if (candidateName && !model.entities.some(e => e.name.toLowerCase() === candidateName.toLowerCase())) {
-      const parsedAttrs: Attribute[] = [];
-      if (definedEntityMatch?.[3] && definedEntityMatch[1].toLowerCase() === candidateName.toLowerCase()) {
-        definedEntityMatch[3].split(',').forEach((tok, idx) => {
-          const m = tok.trim().match(/^([a-zA-Z0-9_]+)\s*:\s*([a-zA-Z0-9_]+)?/);
-          if (m?.[1]) {
-            parsedAttrs.push({
-              id: `at_llm_syn_${Date.now()}_${idx}`,
-              name: m[1],
-              type: ((m[2] || 'VARCHAR').toUpperCase().replace(/[^A-Z]/g, '') || 'VARCHAR') as Attribute['type'],
-              isPrimaryKey: tok.includes('(PK)') || m[1].toLowerCase() === 'id',
-              isForeignKey: tok.includes('(FK)') || m[1].toLowerCase().endsWith('_id'),
-              isNullable: false
-            });
-          }
-        });
-      }
-      if (parsedAttrs.length === 0) {
-        parsedAttrs.push(
-          { id: `at_llm_syn_${Date.now()}_pk`, name: 'id', type: 'BIGINT', isPrimaryKey: true, isNullable: false },
-          { id: `at_llm_syn_${Date.now()}_nom`, name: 'estado', type: 'VARCHAR', length: 40, isPrimaryKey: false, isNullable: false },
-          { id: `at_llm_syn_${Date.now()}_fec`, name: 'fechaRegistro', type: 'TIMESTAMP', isPrimaryKey: false, isNullable: false }
-        );
-      }
-      const newEnt: Entity = {
-        id: `ent_llm_syn_${Date.now()}`,
-        name: candidateName,
-        tableName: definedEntityMatch?.[2] || candidateName.toLowerCase(),
-        x: 120 + (model.entities.length % 3) * 310,
-        y: 120 + Math.floor(model.entities.length / 3) * 240,
-        attributes: parsedAttrs
+      const addRelMatches = Array.from(
+        rawText.matchAll(/\b([A-ZÁÉÍÓÚÑ][a-zA-Z0-9_]{2,})\s*--\(\s*(1:1|1:N|N:M)\s*\)-->\s*([A-ZÁÉÍÓÚÑ][a-zA-Z0-9_]{2,})\b/g)
+      );
+      const patchObj: any = {
+        addEntities: [{ name: candidateName }],
+        addRelationships: addRelMatches.map(m => ({ source: m[1], target: m[3], cardinality: m[2], name: 'asocia' })),
+        summary: `Agregar clase ${candidateName} al diagrama`
       };
-      return {
-        cleanText: rawText,
-        patchProposal: {
-          entities: [...model.entities, newEnt],
-          relationships: model.relationships,
-          summary: `Agregar clase ${candidateName} al diagrama`
-        }
-      };
+      const applied = applyPatchJsonObject(patchObj, model);
+      if (applied) {
+        return { cleanText: rawText, patchProposal: applied };
+      }
     }
     return { cleanText: rawText };
   }
@@ -715,82 +845,10 @@ function extractAndApplyLLMPatch(
   const cleanText = rawText.replace(/<DIAGRAM_PATCH>[\s\S]*?<\/DIAGRAM_PATCH>/gi, '').trim();
   try {
     const patch = JSON.parse(match[1].trim());
-    let entities = model.entities.map(e => ({ ...e, attributes: [...e.attributes] }));
-    let relationships = [...model.relationships];
-
-    if (Array.isArray(patch.deleteEntities) && patch.deleteEntities.length > 0) {
-      const delNames = new Set(patch.deleteEntities.map((n: any) => String(n).toLowerCase()));
-      const delIds = new Set(entities.filter(e => delNames.has(e.name.toLowerCase())).map(e => e.id));
-      entities = entities.filter(e => !delIds.has(e.id));
-      relationships = relationships.filter(r => !delIds.has(r.sourceEntityId) && !delIds.has(r.targetEntityId));
-    }
-
-    if (Array.isArray(patch.addEntities)) {
-      patch.addEntities.forEach((ne: any, idx: number) => {
-        if (!ne?.name || entities.some(e => e.name.toLowerCase() === String(ne.name).toLowerCase())) return;
-        const attrs = Array.isArray(ne.attributes) && ne.attributes.length > 0
-          ? ne.attributes.map((a: any, ai: number) => ({
-              id: `at_llm_${Date.now()}_${idx}_${ai}`,
-              name: a.name || `campo_${ai}`,
-              type: (a.type || 'VARCHAR') as Attribute['type'],
-              isPrimaryKey: Boolean(a.isPrimaryKey),
-              isForeignKey: Boolean(a.isForeignKey),
-              isNullable: Boolean(a.isNullable)
-            }))
-          : [{ id: `at_llm_${Date.now()}_${idx}_pk`, name: 'id', type: 'BIGINT' as const, isPrimaryKey: true, isNullable: false }];
-
-        entities.push({
-          id: `ent_llm_${Date.now()}_${idx}`,
-          name: ne.name,
-          tableName: ne.tableName || String(ne.name).toLowerCase(),
-          x: 120 + ((entities.length + idx) % 3) * 310,
-          y: 120 + Math.floor((entities.length + idx) / 3) * 240,
-          attributes: attrs
-        });
-      });
-    }
-
-    if (Array.isArray(patch.addAttributes)) {
-      patch.addAttributes.forEach((item: any, idx: number) => {
-        const target = entities.find(e => e.name.toLowerCase() === String(item?.entityName || '').toLowerCase());
-        const attrName = item?.name || item?.attribute?.name;
-        if (!target || !attrName) return;
-        if (target.attributes.some(a => a.name.toLowerCase() === String(attrName).toLowerCase())) return;
-        const attrObj = item.attribute || item;
-        target.attributes.push({
-          id: `at_llm_add_${Date.now()}_${idx}`,
-          name: attrName,
-          type: (attrObj.type || 'VARCHAR') as Attribute['type'],
-          isPrimaryKey: Boolean(attrObj.isPrimaryKey),
-          isForeignKey: Boolean(attrObj.isForeignKey),
-          isNullable: Boolean(attrObj.isNullable)
-        });
-      });
-    }
-
-    if (Array.isArray(patch.addRelationships)) {
-      patch.addRelationships.forEach((rel: any, idx: number) => {
-        const src = entities.find(e => e.name.toLowerCase() === String(rel?.source || '').toLowerCase());
-        const tgt = entities.find(e => e.name.toLowerCase() === String(rel?.target || '').toLowerCase());
-        if (!src || !tgt) return;
-        relationships.push({
-          id: `rel_llm_${Date.now()}_${idx}`,
-          name: rel.name || 'asocia',
-          sourceEntityId: src.id,
-          targetEntityId: tgt.id,
-          cardinality: rel.cardinality || '1:N',
-          type: rel.type || 'association'
-        });
-      });
-    }
-
+    const applied = applyPatchJsonObject(patch, model);
     return {
       cleanText: cleanText || patch.summary || 'Cambios aplicados al diagrama.',
-      patchProposal: {
-        entities,
-        relationships,
-        summary: patch.summary || 'Actualización del diagrama por Senior AI'
-      }
+      patchProposal: applied
     };
   } catch {
     return { cleanText: cleanText || rawText };
@@ -953,7 +1011,8 @@ async function callGoogleGeminiAPI(
 async function callLocalLLMAPI(
   prompt: string,
   systemInstruction: string,
-  config: SeniorAIConfig
+  config: SeniorAIConfig,
+  forceJson = false
 ): Promise<string | null> {
   const endpoint = config.localEndpoint?.trim() || 'http://localhost:11434/api/chat';
   const modelName = config.localModel?.trim() || 'llama3.2';
@@ -968,7 +1027,8 @@ async function callLocalLLMAPI(
           { role: 'system', content: systemInstruction },
           { role: 'user', content: prompt }
         ],
-        temperature: config.temperature ?? 0.4
+        temperature: forceJson ? 0.1 : config.temperature ?? 0.4,
+        ...(forceJson ? { response_format: { type: 'json_object' } } : {})
       }
     : {
         model: modelName,
@@ -976,7 +1036,8 @@ async function callLocalLLMAPI(
           { role: 'system', content: systemInstruction },
           { role: 'user', content: prompt }
         ],
-        stream: false
+        stream: false,
+        ...(forceJson ? { format: 'json', options: { temperature: 0.1 } } : {})
       };
 
   const response = await fetch(endpoint, {
@@ -994,6 +1055,96 @@ async function callLocalLLMAPI(
     return data?.choices?.[0]?.message?.content || null;
   }
   return data?.message?.content || data?.response || null;
+}
+
+/**
+ * Detecta si la petición del usuario o la respuesta del modelo describen una mutación del diagrama
+ * (crear/eliminar/editar clases, atributos o relaciones) para garantizar extracción JSON cuando no vino <DIAGRAM_PATCH>.
+ */
+function shouldExtractDiagramPatch(prompt: string, replyText: string): boolean {
+  const combined = `${prompt}\n${replyText}`;
+  return (
+    /\b(agrega|agregar|añade|añadir|crea|crear|genera|generar|añadimos|agregamos|nueva\s+clase|nueva\s+entidad|nuevo\s+atributo|elimina|eliminar|borra|borrar|quita|quitar|conecta|conectar|relaciona|relacionar|vincula|vincular|implementa|implementar|aplica|aplicar)\b/i.test(
+      combined
+    ) || /--\(\s*[^)]+\s*\)-->/.test(replyText)
+  );
+}
+
+/**
+ * Segundo paso compacto con JSON estricto (`format: 'json'` en Ollama) cuando el LLM respondió en prosa
+ * proponiendo cambios al diagrama pero omitió el bloque `<DIAGRAM_PATCH>`.
+ */
+async function extractStructuredPatchWithLLM(
+  prompt: string,
+  replyText: string,
+  model: DiagramModel,
+  config: SeniorAIConfig
+): Promise<{ entities: Entity[]; relationships: Relationship[]; summary: string } | undefined> {
+  const existingSummary =
+    model.entities.length > 0
+      ? model.entities
+          .map(e => `${e.name}(${e.attributes.map(a => `${a.name}${a.isPrimaryKey ? '[PK]' : a.isForeignKey ? '[FK]' : ''}`).join(', ')})`)
+          .join(' | ')
+      : 'lienzo vacío';
+
+  const extractorSystem = `Eres un compilador estricto de parches UML JSON.
+Extrae ÚNICAMENTE los cambios reales sobre el diagrama actual mencionados en la petición del usuario y la solución del asistente.
+Responde SOLO con un objeto JSON válido (sin texto ni markdown) con este esquema exacto:
+{
+  "summary": "resumen corto en español",
+  "deleteEntities": ["NombreClaseSiSeDebeEliminar"],
+  "addEntities": [
+    {
+      "name": "NombreClasePascalCase",
+      "attributes": [
+        { "name": "id", "type": "BIGINT", "isPrimaryKey": true },
+        { "name": "campo", "type": "VARCHAR" }
+      ]
+    }
+  ],
+  "addAttributes": [
+    { "entityName": "NombreClaseExistente", "name": "nuevoCampo", "type": "VARCHAR", "isPrimaryKey": false, "isForeignKey": false }
+  ],
+  "deleteAttributes": [
+    { "entityName": "NombreClaseExistente", "name": "campoABorrar" }
+  ],
+  "addRelationships": [
+    { "source": "ClaseOrigen1", "target": "ClaseDestinoN", "type": "ASSOCIATION", "cardinality": "1:N", "label": "verbo" }
+  ]
+}
+REGLAS:
+- Si la entidad ya existe y solo necesita atributos nuevos, usa "addAttributes" (NO la repitas en "addEntities" ni inventes relaciones no pedidas).
+- En "addEntities" incluye atributos realistas del dominio incluyendo su PK (ej. "id": BIGINT) si es una clase nueva.
+- En "addRelationships", para 1:N pon en "source" el lado 1 (ej. Pedido) y en "target" el lado N (ej. Pago).
+- Nunca inventes clases llamadas "Nueva", "Entidad", "Clase" ni repitas entidades que ya existen salvo para conectarlas o agregarles atributos.`;
+
+  const extractorPrompt = `MODELO ACTUAL EN LIENZO:
+${existingSummary}
+
+PETICIÓN DEL USUARIO:
+${prompt}
+
+SOLUCIÓN / CAMBIO DESCRITO POR EL ASISTENTE:
+${replyText.slice(0, 1800)}
+
+Devuelve el JSON exacto del parche a aplicar al lienzo.`;
+
+  try {
+    let rawJson: string | null = null;
+    if (config.provider === 'local_llm') {
+      rawJson = await callLocalLLMAPI(extractorPrompt, extractorSystem, config, true);
+    } else if (config.provider === 'google_gemini') {
+      rawJson = await callGoogleGeminiAPI(extractorPrompt, extractorSystem, { ...config, temperature: 0.1 });
+    }
+    if (!rawJson) return undefined;
+
+    const jsonMatch = rawJson.match(/\{[\s\S]*\}/);
+    const parsed = JSON.parse(jsonMatch ? jsonMatch[0] : rawJson);
+    return applyPatchJsonObject(parsed, model);
+  } catch (err) {
+    console.warn('No se pudo extraer parche JSON secundario del LLM:', err);
+    return undefined;
+  }
 }
 
 /**
@@ -1391,7 +1542,10 @@ export async function generateSeniorMentorReply(params: {
       const geminiReply = await callGoogleGeminiAPI(prompt, systemPrompt, config);
       if (geminiReply) {
         const { cleanText, patchProposal } = extractAndApplyLLMPatch(geminiReply, model);
-        const finalProposal = config.mode === 'mentor' ? undefined : proposedChange || patchProposal;
+        let finalProposal = config.mode === 'mentor' ? undefined : proposedChange || patchProposal;
+        if (config.mode !== 'mentor' && !finalProposal && shouldExtractDiagramPatch(prompt, cleanText)) {
+          finalProposal = await extractStructuredPatchWithLLM(prompt, cleanText, model, config);
+        }
         return {
           text: cleanText,
           providerUsed: `Google Gemini (${config.googleModel === 'gemini-2.5-flash' ? 'gemini-3.5-flash' : config.googleModel})`,
@@ -1410,7 +1564,10 @@ export async function generateSeniorMentorReply(params: {
       const localReply = await callLocalLLMAPI(prompt, systemPrompt, config);
       if (localReply) {
         const { cleanText, patchProposal } = extractAndApplyLLMPatch(localReply, model);
-        const finalProposal = config.mode === 'mentor' ? undefined : proposedChange || patchProposal;
+        let finalProposal = config.mode === 'mentor' ? undefined : proposedChange || patchProposal;
+        if (config.mode !== 'mentor' && !finalProposal && shouldExtractDiagramPatch(prompt, cleanText)) {
+          finalProposal = await extractStructuredPatchWithLLM(prompt, cleanText, model, config);
+        }
         return {
           text: cleanText,
           providerUsed: `Modelo Local (${config.localModel})`,
