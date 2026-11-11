@@ -537,12 +537,12 @@ export const DiagramCanvas: React.FC<DiagramCanvasProps> = ({
             </marker>
 
             {/* Rombo Blanco (Agregación) */}
-            <marker id="marker-aggregation" viewBox="0 0 16 16" refX="8" refY="8" markerWidth="14" markerHeight="14" orient="auto">
+            <marker id="marker-aggregation" viewBox="0 0 16 16" refX="1" refY="8" markerWidth="14" markerHeight="14" orient="auto">
               <polygon points="8,1 15,8 8,15 1,8" fill="#0b1329" stroke="#38bdf8" strokeWidth="2" />
             </marker>
 
             {/* Rombo Relleno Morado/Azul (Composición) */}
-            <marker id="marker-composition" viewBox="0 0 16 16" refX="8" refY="8" markerWidth="14" markerHeight="14" orient="auto">
+            <marker id="marker-composition" viewBox="0 0 16 16" refX="1" refY="8" markerWidth="14" markerHeight="14" orient="auto">
               <polygon points="8,1 15,8 8,15 1,8" fill="#818cf8" stroke="#c7d2fe" strokeWidth="2" />
             </marker>
 
@@ -563,9 +563,11 @@ export const DiagramCanvas: React.FC<DiagramCanvasProps> = ({
             if (!src || !tgt) return null;
 
             const srcW = BOX_WIDTH;
-            const srcH = Math.max(BOX_HEIGHT, 64 + src.attributes.length * 24 + (viewMode === 'uml' ? 46 : 0));
             const tgtW = BOX_WIDTH;
-            const tgtH = Math.max(BOX_HEIGHT, 64 + tgt.attributes.length * 24 + (viewMode === 'uml' ? 46 : 0));
+            const srcMethodRows = viewMode === 'uml' ? Math.max(2, src.methods?.length || 0) * 20 + 22 : 0;
+            const tgtMethodRows = viewMode === 'uml' ? Math.max(2, tgt.methods?.length || 0) * 20 + 22 : 0;
+            const srcH = Math.max(BOX_HEIGHT, 64 + src.attributes.length * 24 + srcMethodRows);
+            const tgtH = Math.max(BOX_HEIGHT, 64 + tgt.attributes.length * 24 + tgtMethodRows);
 
             const cx1 = src.x + srcW / 2;
             const cy1 = src.y + srcH / 2;
@@ -653,30 +655,30 @@ export const DiagramCanvas: React.FC<DiagramCanvasProps> = ({
                   opacity="0.95"
                 />
 
-                {/* Multiplicidades oficiales UML 2.5 en extremos */}
+                {/* Multiplicidades y roles oficiales UML 2.5 en extremos */}
                 {viewMode === 'uml' && showMultiplicity && (
                   <>
                     <text
-                      x={x1 + ux * 20 - uy * 12}
-                      y={y1 + uy * 20 + ux * 12}
+                      x={x1 + ux * 24 - uy * 13}
+                      y={y1 + uy * 24 + ux * 13}
                       fill="#e2e8f0"
                       fontSize="11"
                       fontWeight="800"
                       textAnchor="middle"
                       fontFamily="var(--font-mono)"
                     >
-                      {srcMult}
+                      {rel.sourceRole ? `${rel.sourceRole} ` : ''}{srcMult}
                     </text>
                     <text
-                      x={x2 - ux * 20 - uy * 12}
-                      y={y2 - uy * 20 + ux * 12}
+                      x={x2 - ux * 24 - uy * 13}
+                      y={y2 - uy * 24 + ux * 13}
                       fill="#e2e8f0"
                       fontSize="11"
                       fontWeight="800"
                       textAnchor="middle"
                       fontFamily="var(--font-mono)"
                     >
-                      {tgtMult}
+                      {tgtMult}{rel.targetRole ? ` ${rel.targetRole}` : ''}
                     </text>
                   </>
                 )}

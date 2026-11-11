@@ -14,6 +14,7 @@ export interface Attribute {
   name: string;
   type: DataType;
   length?: number;
+  visibility?: 'public' | 'private' | 'protected' | 'package';
   isPrimaryKey: boolean;
   isForeignKey?: boolean;
   isNullable: boolean;
@@ -36,6 +37,7 @@ export interface Entity {
   id: string;
   name: string;
   tableName?: string;
+  stereotype?: 'entity' | 'class' | 'abstract' | 'interface' | 'enum';
   x: number;
   y: number;
   color?: string;

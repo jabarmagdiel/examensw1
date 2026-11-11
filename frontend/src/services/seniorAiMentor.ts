@@ -1885,3 +1885,76 @@ export async function generateSeniorMentorReply(params: {
     autoApply: config.mode === 'solver' && Boolean(proposedChange)
   };
 }
+
+/**
+ * Aplica una instrucción de edición en lenguaje natural sobre cualquier modelo
+ * (usado por Foto UML para editar clases/atributos/relaciones con Ollama, Gemini o reglas locales).
+ */
+export async function applyNaturalLanguageDiagramEdit(
+  instruction: string,
+  model: DiagramModel,
+  enginePreference: 'auto' | 'gemini' | 'local' = 'auto',
+  customGeminiApiKey?: string
+): Promise<{
+  success: boolean;
+  model: DiagramModel;
+  summary: string;
+  providerUsed: string;
+}> {
+  const direct = executeVoiceCommand(instruction, model);
+  if (direct.actionType !== 'UNKNOWN') {
+    return {
+      success: true,
+      model: direct.model,
+      summary: direct.summary,
+      providerUsed: 'Motor Rápido PUDS'
+    };
+  }
+
+  const baseConfig = loadSeniorAIConfig();
+  const effectiveKey = customGeminiApiKey?.trim() || baseConfig.googleApiKey?.trim() || (import.meta as any).env?.VITE_GEMINI_API_KEY;
+  const order: Array<'local_llm' | 'google_gemini'> =
+    enginePreference === 'gemini'
+      ? ['google_gemini', 'local_llm']
+      : enginePreference === 'local'
+      ? ['local_llm', 'google_gemini']
+      : baseConfig.provider === 'google_gemini' && effectiveKey
+      ? ['google_gemini', 'local_llm']
+      : ['local_llm', 'google_gemini'];
+
+  for (const prov of order) {
+    if (prov === 'google_gemini' && !effectiveKey) continue;
+    try {
+      const cfg: SeniorAIConfig = {
+        ...baseConfig,
+        provider: prov,
+        googleApiKey: effectiveKey || baseConfig.googleApiKey,
+        temperature: 0.1
+      };
+      const patch = await extractStructuredPatchWithLLM(instruction, instruction, model, cfg);
+      if (patch) {
+        return {
+          success: true,
+          model: {
+            ...model,
+            entities: patch.entities,
+            relationships: patch.relationships,
+            updatedAt: Date.now(),
+            version: (model.version || 1) + 1
+          },
+          summary: patch.summary,
+          providerUsed: prov === 'google_gemini' ? `Google Gemini` : `Ollama Local (${cfg.localModel})`
+        };
+      }
+    } catch {
+      // probar siguiente proveedor
+    }
+  }
+
+  return {
+    success: false,
+    model,
+    summary: 'No pude interpretar esa edición automáticamente. Prueba indicando la clase y acción (ej: "agregar atributo email a Paciente" o "crear clase Pago relacionada con Pedido").',
+    providerUsed: 'Sin cambios'
+  };
+}

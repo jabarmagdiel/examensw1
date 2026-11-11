@@ -93,10 +93,17 @@ export const EntityNode: React.FC<EntityNodeProps> = ({
           )}
           {viewMode === 'uml' && !isConnectingSource && (
             <div style={{ fontSize: 9, color: '#a5b4fc', textTransform: 'lowercase', letterSpacing: '0.06em', fontWeight: 700 }}>
-              &laquo;class / entity&raquo;
+              &laquo;{entity.stereotype || 'class / entity'}&raquo;
             </div>
           )}
-          <span style={{ color: 'var(--text-primary)' }}>{entity.name}</span>
+          <span
+            style={{
+              color: 'var(--text-primary)',
+              fontStyle: entity.stereotype === 'abstract' || entity.stereotype === 'interface' ? 'italic' : 'normal'
+            }}
+          >
+            {entity.name}
+          </span>
           {viewMode === 'physical' && entity.tableName && (
             <div style={{ fontSize: 10, color: 'var(--text-secondary)', fontWeight: 400 }}>
               tabla: {entity.tableName}
@@ -149,6 +156,14 @@ export const EntityNode: React.FC<EntityNodeProps> = ({
           const umlMultiplicity = attr.isNullable ? ' [0..1]' : '';
 
           if (viewMode === 'uml') {
+            const attrVisSymbol =
+              attr.visibility === 'public'
+                ? '+'
+                : attr.visibility === 'protected'
+                ? '#'
+                : attr.visibility === 'package'
+                ? '~'
+                : '-';
             return (
               <div
                 key={attr.id}
@@ -156,7 +171,7 @@ export const EntityNode: React.FC<EntityNodeProps> = ({
                 style={{ fontFamily: 'var(--font-mono)', fontSize: 11, gap: 6 }}
               >
                 <div style={{ display: 'flex', alignItems: 'center', gap: 4, minWidth: 0, overflow: 'hidden' }}>
-                  <span style={{ color: '#94a3b8', fontWeight: 700 }}>-</span>
+                  <span style={{ color: '#94a3b8', fontWeight: 700 }}>{attrVisSymbol}</span>
                   <span
                     style={{
                       color: attr.isPrimaryKey ? '#fbbf24' : attr.isForeignKey ? '#38bdf8' : 'var(--text-primary)',

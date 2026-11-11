@@ -51,13 +51,16 @@ export function exportToEnterpriseArchitectUML25(diagram: DiagramModel): string 
   // 1. Clases UML 2.5 (Atributos, Operaciones y Generalizaciones)
   diagram.entities.forEach(entity => {
     const classId = `EAID_${entity.id.replace(/[^a-zA-Z0-9_]/g, '_')}`;
-    xml += `      <packagedElement xmi:type="uml:Class" xmi:id="${classId}" name="${entity.name}" visibility="public">
+    const umlElemType = entity.stereotype === 'interface' ? 'uml:Interface' : 'uml:Class';
+    const isAbsAttr = entity.stereotype === 'abstract' ? ' isAbstract="true"' : '';
+    xml += `      <packagedElement xmi:type="${umlElemType}" xmi:id="${classId}" name="${entity.name}" visibility="public"${isAbsAttr}>
 `;
 
     entity.attributes.forEach(attr => {
       const attrId = `EAID_ATTR_${attr.id.replace(/[^a-zA-Z0-9_]/g, '_')}`;
       const umlType = mapDataTypeToUML(attr.type);
-      xml += `        <ownedAttribute xmi:type="uml:Property" xmi:id="${attrId}" name="${attr.name}" visibility="private" isUnique="${attr.isUnique ? 'true' : 'false'}" isID="${attr.isPrimaryKey ? 'true' : 'false'}">
+      const vis = attr.visibility || 'private';
+      xml += `        <ownedAttribute xmi:type="uml:Property" xmi:id="${attrId}" name="${attr.name}" visibility="${vis}" isUnique="${attr.isUnique ? 'true' : 'false'}" isID="${attr.isPrimaryKey ? 'true' : 'false'}">
           <type xmi:type="uml:PrimitiveType" href="http://www.omg.org/spec/UML/20131001/PrimitiveTypes.xmi#${umlType}"/>
           <lowerValue xmi:type="uml:LiteralInteger" xmi:id="EAID_LV_${attr.id.replace(/[^a-zA-Z0-9_]/g, '_')}" value="${attr.isNullable ? 0 : 1}"/>
           <upperValue xmi:type="uml:LiteralUnlimitedNatural" xmi:id="EAID_UV_${attr.id.replace(/[^a-zA-Z0-9_]/g, '_')}" value="1"/>

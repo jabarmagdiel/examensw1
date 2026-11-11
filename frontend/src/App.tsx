@@ -246,7 +246,7 @@ export default function App() {
   }, [activeModule]);
 
   // Vistas del Canvas
-  const [currentView, setCurrentView] = useState<'conceptual' | 'logical' | 'physical' | 'uml'>('conceptual');
+  const [currentView, setCurrentView] = useState<'conceptual' | 'logical' | 'physical' | 'uml'>('uml');
   const [selectedEntityId, setSelectedEntityId] = useState<string | null>(null);
   const [editingEntity, setEditingEntity] = useState<Entity | null>(null);
 

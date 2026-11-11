@@ -1,6 +1,7 @@
 import React, { useState, useRef } from 'react';
 import { X, Camera, Upload, Sparkles, CheckCircle2, Image as ImageIcon, Wand2 } from 'lucide-react';
-import { executeVoiceCommand, processDiagramPhoto } from '../../services/aiAssistant';
+import { processDiagramPhoto } from '../../services/aiAssistant';
+import { applyNaturalLanguageDiagramEdit } from '../../services/seniorAiMentor';
 import { DiagramModel } from '../../types/case';
 
 interface DiagramPhotoScannerProps {
@@ -22,6 +23,7 @@ export const DiagramPhotoScanner: React.FC<DiagramPhotoScannerProps> = ({
   const [scanError, setScanError] = useState<string | null>(null);
   const [photoHint, setPhotoHint] = useState('');
   const [editPrompt, setEditPrompt] = useState('');
+  const [isEditingAI, setIsEditingAI] = useState(false);
   const [scanEngine, setScanEngine] = useState<'auto' | 'gemini' | 'local'>('auto');
   const [geminiKeyInput, setGeminiKeyInput] = useState<string>(() => {
     try {
@@ -95,8 +97,10 @@ export const DiagramPhotoScanner: React.FC<DiagramPhotoScannerProps> = ({
     }
   };
 
-  const handleEditScannedWithAI = () => {
-    if (!scanResult || !editPrompt.trim()) return;
+  const handleEditScannedWithAI = async () => {
+    if (!scanResult || !editPrompt.trim() || isEditingAI) return;
+    setIsEditingAI(true);
+    setScanError(null);
     const tempModel: DiagramModel = {
       id: 'photo_temp',
       name: 'Diagrama Escaneado',
@@ -106,16 +110,23 @@ export const DiagramPhotoScanner: React.FC<DiagramPhotoScannerProps> = ({
       updatedAt: Date.now(),
       version: 1
     };
-    const res = executeVoiceCommand(editPrompt, tempModel);
-    if (res.actionType !== 'UNKNOWN') {
-      setScanResult({
-        entities: res.model.entities,
-        relationships: res.model.relationships,
-        summary: `${scanResult.summary} • Editado por IA: ${res.summary}`
-      });
-      setEditPrompt('');
-    } else {
-      setScanError('Prueba comandos como: "agregar atributo email a Paciente", "crear tabla Cita", o "relacionar Paciente con Doctor".');
+    try {
+      const res = await applyNaturalLanguageDiagramEdit(editPrompt, tempModel, scanEngine, geminiKeyInput);
+      if (res.success) {
+        setScanResult({
+          entities: res.model.entities,
+          relationships: res.model.relationships,
+          summary: `${scanResult.summary} • Editado (${res.providerUsed}): ${res.summary}`,
+          providerUsed: res.providerUsed
+        });
+        setEditPrompt('');
+      } else {
+        setScanError(res.summary);
+      }
+    } catch (err: any) {
+      setScanError(err?.message || 'No se pudo aplicar la edición IA sobre el diagrama escaneado.');
+    } finally {
+      setIsEditingAI(false);
     }
   };
 
@@ -457,8 +468,9 @@ export const DiagramPhotoScanner: React.FC<DiagramPhotoScannerProps> = ({
                 className="btn-secondary"
                 style={{ fontSize: 11, padding: '6px 10px', borderColor: '#a855f7', color: '#e9d5ff' }}
                 onClick={handleEditScannedWithAI}
+                disabled={isEditingAI}
               >
-                <Wand2 size={12} /> Editar IA
+                <Wand2 size={12} /> {isEditingAI ? 'Editando...' : 'Editar IA'}
               </button>
             </div>
 
