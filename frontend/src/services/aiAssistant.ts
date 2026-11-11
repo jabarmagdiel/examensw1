@@ -1274,6 +1274,8 @@ Responde ÚNICAMENTE con un JSON válido con esta estructura exacta (sin markdow
             body: JSON.stringify({
               model: visionModel,
               stream: false,
+              format: 'json',
+              options: { temperature: 0.1 },
               messages: [
                 {
                   role: 'user',
