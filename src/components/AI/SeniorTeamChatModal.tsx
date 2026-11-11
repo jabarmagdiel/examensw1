@@ -98,14 +98,39 @@ function renderInlineMarkdown(line: string): React.ReactNode[] {
 }
 
 function renderFormattedText(text: string): React.ReactNode {
-  const lines = text.split('\n');
+  const segments = text.split(/(```[\s\S]*?```)/g);
   return (
-    <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
-      {lines.map((line, i) => {
-        if (!line.trim()) {
-          return <div key={i} style={{ height: 4 }} />;
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+      {segments.map((seg, segIdx) => {
+        if (seg.startsWith('```') && seg.endsWith('```')) {
+          const inner = seg.slice(3, -3).replace(/^[a-zA-Z0-9_-]+\r?\n/, '').trim();
+          return (
+            <pre
+              key={segIdx}
+              style={{
+                margin: '4px 0',
+                padding: '8px 10px',
+                borderRadius: 8,
+                background: 'rgba(9, 13, 22, 0.88)',
+                border: '1px solid rgba(56, 189, 248, 0.25)',
+                color: '#cbd5e1',
+                fontSize: 10.5,
+                overflowX: 'auto',
+                fontFamily: 'var(--font-mono, monospace)'
+              }}
+            >
+              {inner}
+            </pre>
+          );
         }
-        return <div key={i}>{renderInlineMarkdown(line)}</div>;
+
+        const lines = seg.split('\n');
+        return lines.map((line, i) => {
+          if (!line.trim()) {
+            return <div key={`${segIdx}_${i}`} style={{ height: 3 }} />;
+          }
+          return <div key={`${segIdx}_${i}`}>{renderInlineMarkdown(line)}</div>;
+        });
       })}
     </div>
   );

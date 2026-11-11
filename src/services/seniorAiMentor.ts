@@ -504,6 +504,242 @@ export function analyzeDiagramContext(model: DiagramModel): {
 }
 
 /**
+ * Construye una solución estructural unificada sobre el modelo actual:
+ * 1) Agrega clave primaria 'id' a todas las entidades sin PK
+ * 2) Agrega atributos FK explícitos en las tablas destino de relaciones 1:N / 1:1
+ * 3) Descompone relaciones N:M en tablas asociativas si existen
+ */
+export function buildCombinedStructuralFix(
+  model: DiagramModel,
+  audit: ReturnType<typeof analyzeDiagramContext>
+): { entities: Entity[]; relationships: Relationship[]; summary: string } | undefined {
+  if (
+    audit.entitiesWithoutPK.length === 0 &&
+    audit.missingFKEntities.length === 0 &&
+    audit.nmRelationships.length === 0
+  ) {
+    const firstProposal = audit.findings.find(f => f.proposedEntities && f.proposedRelationships);
+    if (firstProposal?.proposedEntities && firstProposal?.proposedRelationships) {
+      return {
+        entities: firstProposal.proposedEntities,
+        relationships: firstProposal.proposedRelationships,
+        summary: firstProposal.proposalSummary || firstProposal.title
+      };
+    }
+    return undefined;
+  }
+
+  let updatedEntities: Entity[] = model.entities.map(ent => ({
+    ...ent,
+    attributes: [...ent.attributes]
+  }));
+  let updatedRelationships: Relationship[] = [...model.relationships];
+  const appliedParts: string[] = [];
+
+  // 1. Claves Primarias faltantes
+  if (audit.entitiesWithoutPK.length > 0) {
+    const names = audit.entitiesWithoutPK.map(e => e.name);
+    updatedEntities = updatedEntities.map(ent => {
+      if (ent.attributes.some(a => a.isPrimaryKey)) return ent;
+      const existingId = ent.attributes.find(a => a.name.toLowerCase() === 'id');
+      if (existingId) {
+        return {
+          ...ent,
+          attributes: ent.attributes.map(a =>
+            a.id === existingId.id ? { ...a, isPrimaryKey: true, isNullable: false } : a
+          )
+        };
+      }
+      return {
+        ...ent,
+        attributes: [
+          {
+            id: `pk_auto_${Date.now()}_${ent.id.slice(-4)}`,
+            name: 'id',
+            type: 'BIGINT',
+            isPrimaryKey: true,
+            isNullable: false
+          },
+          ...ent.attributes
+        ]
+      };
+    });
+    appliedParts.push(`PK 'id' en ${names.join(', ')}`);
+  }
+
+  // 2. Claves Foráneas faltantes en relaciones 1:N / 1:1
+  if (audit.missingFKEntities.length > 0) {
+    const fkNames: string[] = [];
+    audit.missingFKEntities.forEach((m, idx) => {
+      updatedEntities = updatedEntities.map(ent => {
+        if (ent.id !== m.target.id) return ent;
+        if (ent.attributes.some(a => a.name.toLowerCase() === m.suggestedFK.toLowerCase())) return ent;
+        fkNames.push(`${ent.name}.${m.suggestedFK}`);
+        return {
+          ...ent,
+          attributes: [
+            ...ent.attributes,
+            {
+              id: `fk_auto_${Date.now()}_${idx}`,
+              name: m.suggestedFK,
+              type: 'BIGINT',
+              isPrimaryKey: false,
+              isForeignKey: true,
+              isNullable: false
+            }
+          ]
+        };
+      });
+    });
+    if (fkNames.length > 0) {
+      appliedParts.push(`FKs (${fkNames.join(', ')})`);
+    }
+  }
+
+  // 3. Descomponer N:M si existen
+  if (audit.nmRelationships.length > 0) {
+    const firstNM = audit.nmRelationships[0];
+    if (firstNM.source && firstNM.target) {
+      const assocName = `Detalle${firstNM.source.name}${firstNM.target.name}`;
+      if (!updatedEntities.some(e => e.name.toLowerCase() === assocName.toLowerCase())) {
+        const newAssocId = `ent_assoc_${firstNM.source.id}_${firstNM.target.id}_${Date.now()}`;
+        updatedEntities.push({
+          id: newAssocId,
+          name: assocName,
+          tableName: `detalle_${firstNM.source.name.toLowerCase()}_${firstNM.target.name.toLowerCase()}`,
+          x: Math.round((firstNM.source.x + firstNM.target.x) / 2),
+          y: Math.round((firstNM.source.y + firstNM.target.y) / 2) + 160,
+          color: '#ec4899',
+          attributes: [
+            { id: `at_${Date.now()}_1`, name: 'id', type: 'BIGINT', isPrimaryKey: true, isNullable: false },
+            { id: `at_${Date.now()}_2`, name: `${firstNM.source.name.toLowerCase()}_id`, type: 'BIGINT', isPrimaryKey: false, isForeignKey: true, isNullable: false },
+            { id: `at_${Date.now()}_3`, name: `${firstNM.target.name.toLowerCase()}_id`, type: 'BIGINT', isPrimaryKey: false, isForeignKey: true, isNullable: false }
+          ]
+        });
+        updatedRelationships = updatedRelationships
+          .filter(r => r.id !== firstNM.rel.id)
+          .concat([
+            {
+              id: `rel_${Date.now()}_a`,
+              name: 'contiene',
+              sourceEntityId: firstNM.source.id,
+              targetEntityId: newAssocId,
+              cardinality: '1:N',
+              foreignKeyAttributeName: `${firstNM.source.name.toLowerCase()}_id`
+            },
+            {
+              id: `rel_${Date.now()}_b`,
+              name: 'referencia',
+              sourceEntityId: firstNM.target.id,
+              targetEntityId: newAssocId,
+              cardinality: '1:N',
+              foreignKeyAttributeName: `${firstNM.target.name.toLowerCase()}_id`
+            }
+          ]);
+        appliedParts.push(`tabla asociativa ${assocName}`);
+      }
+    }
+  }
+
+  return {
+    entities: updatedEntities,
+    relationships: updatedRelationships,
+    summary: `Implementar ${appliedParts.join(' + ')}`
+  };
+}
+
+/**
+ * Extrae y aplica parches JSON opcionales emitidos por un LLM (Ollama / Gemini)
+ */
+function extractAndApplyLLMPatch(
+  rawText: string,
+  model: DiagramModel
+): {
+  cleanText: string;
+  patchProposal?: { entities: Entity[]; relationships: Relationship[]; summary: string };
+} {
+  const match = rawText.match(/<DIAGRAM_PATCH>([\s\S]*?)<\/DIAGRAM_PATCH>/i);
+  if (!match) return { cleanText: rawText };
+
+  const cleanText = rawText.replace(/<DIAGRAM_PATCH>[\s\S]*?<\/DIAGRAM_PATCH>/gi, '').trim();
+  try {
+    const patch = JSON.parse(match[1].trim());
+    let entities = model.entities.map(e => ({ ...e, attributes: [...e.attributes] }));
+    let relationships = [...model.relationships];
+
+    if (Array.isArray(patch.addEntities)) {
+      patch.addEntities.forEach((ne: any, idx: number) => {
+        if (!ne?.name || entities.some(e => e.name.toLowerCase() === String(ne.name).toLowerCase())) return;
+        const attrs = Array.isArray(ne.attributes) && ne.attributes.length > 0
+          ? ne.attributes.map((a: any, ai: number) => ({
+              id: `at_llm_${Date.now()}_${idx}_${ai}`,
+              name: a.name || `campo_${ai}`,
+              type: (a.type || 'VARCHAR') as Attribute['type'],
+              isPrimaryKey: Boolean(a.isPrimaryKey),
+              isForeignKey: Boolean(a.isForeignKey),
+              isNullable: Boolean(a.isNullable)
+            }))
+          : [{ id: `at_llm_${Date.now()}_${idx}_pk`, name: 'id', type: 'BIGINT' as const, isPrimaryKey: true, isNullable: false }];
+
+        entities.push({
+          id: `ent_llm_${Date.now()}_${idx}`,
+          name: ne.name,
+          tableName: ne.tableName || String(ne.name).toLowerCase(),
+          x: 120 + ((entities.length + idx) % 3) * 310,
+          y: 120 + Math.floor((entities.length + idx) / 3) * 240,
+          attributes: attrs
+        });
+      });
+    }
+
+    if (Array.isArray(patch.addAttributes)) {
+      patch.addAttributes.forEach((item: any, idx: number) => {
+        const target = entities.find(e => e.name.toLowerCase() === String(item?.entityName || '').toLowerCase());
+        const attrName = item?.name || item?.attribute?.name;
+        if (!target || !attrName) return;
+        if (target.attributes.some(a => a.name.toLowerCase() === String(attrName).toLowerCase())) return;
+        const attrObj = item.attribute || item;
+        target.attributes.push({
+          id: `at_llm_add_${Date.now()}_${idx}`,
+          name: attrName,
+          type: (attrObj.type || 'VARCHAR') as Attribute['type'],
+          isPrimaryKey: Boolean(attrObj.isPrimaryKey),
+          isForeignKey: Boolean(attrObj.isForeignKey),
+          isNullable: Boolean(attrObj.isNullable)
+        });
+      });
+    }
+
+    if (Array.isArray(patch.addRelationships)) {
+      patch.addRelationships.forEach((rel: any, idx: number) => {
+        const src = entities.find(e => e.name.toLowerCase() === String(rel?.source || '').toLowerCase());
+        const tgt = entities.find(e => e.name.toLowerCase() === String(rel?.target || '').toLowerCase());
+        if (!src || !tgt) return;
+        relationships.push({
+          id: `rel_llm_${Date.now()}_${idx}`,
+          name: rel.name || 'asocia',
+          sourceEntityId: src.id,
+          targetEntityId: tgt.id,
+          cardinality: rel.cardinality || '1:N',
+          type: rel.type || 'association'
+        });
+      });
+    }
+
+    return {
+      cleanText: cleanText || patch.summary || 'Cambios aplicados al diagrama.',
+      patchProposal: {
+        entities,
+        relationships,
+        summary: patch.summary || 'Actualización del diagrama por Senior AI'
+      }
+    };
+  } catch {
+    return { cleanText: cleanText || rawText };
+  }
+}
+
+/**
  * Construye el System Prompt completo para Google Gemini o Modelo Local (Ollama / LM Studio)
  */
 export function buildSeniorSystemPrompt(params: {
@@ -513,8 +749,9 @@ export function buildSeniorSystemPrompt(params: {
   selectedEntity?: Entity | null;
   config: SeniorAIConfig;
   recentMessages: GroupChatMessage[];
+  pendingProposalSummary?: string;
 }): string {
-  const { model, askingUser, collaborators, selectedEntity, config, recentMessages } = params;
+  const { model, askingUser, collaborators, selectedEntity, config, recentMessages, pendingProposalSummary } = params;
   const audit = analyzeDiagramContext(model);
 
   const entitiesDesc = model.entities
@@ -544,19 +781,29 @@ export function buildSeniorSystemPrompt(params: {
   const modeInstruction = {
     mentor: `MODO CONFIGURADO: MENTOR SOCRÁTICO (Guía Senior). NO entregues todo resuelto de golpe; explica el criterio de ingeniería, señala qué debe observar en el diagrama actual y guíalo paso a paso como un Tech Lead / Senior Mentor.`,
     hybrid: `MODO CONFIGURADO: COPILOTO SENIOR (Mentoría + Propuesta de Solución). Explica con criterio de Desarrollador Senior por qué recomiendas el cambio y ofrece la solución técnica estructurada para que el equipo decida aplicarla.`,
-    solver: `MODO CONFIGURADO: SOLUCIONADOR DIRECTO (Co-Autor Senior). Además de dar tu justificación breve como Senior, entrega la solución técnica completa y lista para aplicarse directamente en el diagrama.`
+    solver: `MODO CONFIGURADO: SOLUCIONADOR DIRECTO (Co-Autor Senior). Los cambios solicitados se aplican DIRECTAMENTE sobre el lienzo visual; sé breve, claro y confirma qué se modificó en el diagrama sin mandar al usuario a hacerlo a mano.`
   }[config.mode];
+
+  const actionNote = pendingProposalSummary
+    ? config.mode === 'solver'
+      ? `\nACCIÓN YA EJECUTADA EN EL LIENZO POR EL SISTEMA: "${pendingProposalSummary}". Confirma al usuario brevemente los cambios aplicados en el diagrama (NO escribas bloques SQL manuales ni le digas que lo haga él).`
+      : config.mode === 'hybrid'
+      ? `\nPROPUESTA LISTA EN EL BOTÓN DE ABAJO: "${pendingProposalSummary}". Explica brevemente este cambio y dile que puede aplicarlo con el botón verde de abajo.`
+      : ''
+    : config.mode !== 'mentor'
+    ? `\nSi el usuario pide explícitamente agregar o modificar clases, atributos o relaciones en el diagrama y no es solo una duda conceptual, puedes incluir al final de tu respuesta un bloque JSON exacto así (solo si realmente pide modificar el diagrama):\n<DIAGRAM_PATCH>{"addEntities":[],"addAttributes":[{"entityName":"Clase","name":"campo","type":"VARCHAR","isPrimaryKey":false,"isForeignKey":false}],"addRelationships":[{"source":"A","target":"B","cardinality":"1:N","type":"association","name":"tiene"}],"summary":"Resumen breve"}</DIAGRAM_PATCH>`
+    : '';
 
   return `Eres el Desarrollador Senior del equipo (Arq. IA Senior) dentro de la plataforma CASE Enterprise Studio.
 Participas en el chat grupal como **un compañero técnico más del equipo** trabajando codo a codo sobre el mismo diagrama.
 
 ESTILO DE COMUNICACIÓN (MUY IMPORTANTE):
-- Habla de forma natural, cercana y directa, como un desarrollador Senior real en el chat del equipo (ej: "Buena pregunta, ${askingUser.name}...", "Mira, en nuestro diagrama...", "Para esto te conviene...").
-- PROHIBIDO usar encabezados robóticos o de plantilla como "Hola X — Te respondo desde la visión de..." o repetir el resumen completo del proyecto si no viene al caso.
+- Habla de forma natural, cercana y directa, como un desarrollador Senior real en el chat del equipo (ej: "Listo ${askingUser.name}...", "Mira, en nuestro diagrama...", "Para esto te conviene...").
+- PROHIBIDO usar encabezados robóticos o de plantilla como "Hola X — Te respondo desde la visión de...".
 - Quien escribe ahora es **${askingUser.name}** (rol **${askingUser.role}**). ${roleInstruction}
 - Usa ejemplos concretos de las entidades y atributos reales de "${model.name}" cuando ayude a explicar.
 
-${modeInstruction}
+${modeInstruction}${actionNote}
 
 CONTEXTO COMPLETO EN TIEMPO REAL DEL PROYECTO:
 - Proyecto Activo: "${model.name}" | Cliente: "${model.client || 'N/A'}" | Fase: "${model.status || 'Diseño'}"
@@ -996,6 +1243,15 @@ export async function generateSeniorMentorReply(params: {
     }
   }
 
+  const wantsStructuralImplementOrFix =
+    isAskingAboutMissingClasses ||
+    /\b(implementa|implementarlo|implementar|implementes|hazlo|aplica|aplicar|apliques|ejecuta|ponle|completa|completar|solucion|arregla|corrige|optimiza|normaliza|mejora|foranea|primaria|llaves|audita|revisa)\b/.test(
+      normalizedPrompt
+    ) ||
+    lower.includes('n:m') ||
+    lower.includes('muchos a muchos') ||
+    /\b(pk|fk)\b/.test(normalizedPrompt);
+
   let proposedChange: { entities: Entity[]; relationships: Relationship[]; summary: string } | undefined;
 
   if (directCommandResult.actionType !== 'UNKNOWN') {
@@ -1010,31 +1266,8 @@ export async function generateSeniorMentorReply(params: {
       relationships: model.relationships,
       summary: missingAttributesAnalysis.summary
     };
-  } else if (
-    isAskingAboutMissingClasses ||
-    lower.includes('solucion') ||
-    lower.includes('arregla') ||
-    lower.includes('corrige') ||
-    lower.includes('optimiza') ||
-    lower.includes('normaliza') ||
-    lower.includes('mejora') ||
-    lower.includes('n:m') ||
-    lower.includes('muchos a muchos') ||
-    lower.includes('foranea') ||
-    lower.includes('fk') ||
-    lower.includes('audita') ||
-    lower.includes('revisa')
-  ) {
-    if (audit.findings.length > 0) {
-      const topFinding = audit.findings[0];
-      if (topFinding.proposedEntities && topFinding.proposedRelationships) {
-        proposedChange = {
-          entities: topFinding.proposedEntities,
-          relationships: topFinding.proposedRelationships,
-          summary: topFinding.proposalSummary || topFinding.title
-        };
-      }
-    }
+  } else if (wantsStructuralImplementOrFix) {
+    proposedChange = buildCombinedStructuralFix(model, audit);
   }
 
   // 2. Generar snippet de código contextual si pregunta un Implementador o si piden código/SQL/Spring
@@ -1094,19 +1327,22 @@ export async function generateSeniorMentorReply(params: {
     collaborators,
     selectedEntity,
     config,
-    recentMessages
+    recentMessages,
+    pendingProposalSummary: proposedChange?.summary
   });
 
   if (config.provider === 'google_gemini' && (config.googleApiKey?.trim() || (import.meta as any).env?.VITE_GEMINI_API_KEY)) {
     try {
       const geminiReply = await callGoogleGeminiAPI(prompt, systemPrompt, config);
       if (geminiReply) {
+        const { cleanText, patchProposal } = extractAndApplyLLMPatch(geminiReply, model);
+        const finalProposal = config.mode === 'mentor' ? undefined : proposedChange || patchProposal;
         return {
-          text: geminiReply,
-          providerUsed: `Google Gemini (${config.googleModel})`,
-          proposedChange: config.mode === 'mentor' ? undefined : proposedChange,
+          text: cleanText,
+          providerUsed: `Google Gemini (${config.googleModel === 'gemini-2.5-flash' ? 'gemini-3.5-flash' : config.googleModel})`,
+          proposedChange: finalProposal,
           codeSnippet,
-          autoApply: config.mode === 'solver' && Boolean(proposedChange)
+          autoApply: config.mode === 'solver' && Boolean(finalProposal)
         };
       }
     } catch (err) {
@@ -1118,12 +1354,14 @@ export async function generateSeniorMentorReply(params: {
     try {
       const localReply = await callLocalLLMAPI(prompt, systemPrompt, config);
       if (localReply) {
+        const { cleanText, patchProposal } = extractAndApplyLLMPatch(localReply, model);
+        const finalProposal = config.mode === 'mentor' ? undefined : proposedChange || patchProposal;
         return {
-          text: localReply,
+          text: cleanText,
           providerUsed: `Modelo Local (${config.localModel})`,
-          proposedChange: config.mode === 'mentor' ? undefined : proposedChange,
+          proposedChange: finalProposal,
           codeSnippet,
-          autoApply: config.mode === 'solver' && Boolean(proposedChange)
+          autoApply: config.mode === 'solver' && Boolean(finalProposal)
         };
       }
     } catch (err) {
