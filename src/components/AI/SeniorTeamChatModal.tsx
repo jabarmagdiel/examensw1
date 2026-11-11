@@ -223,6 +223,28 @@ export const SeniorTeamChatModal: React.FC<SeniorTeamChatModalProps> = ({
       };
 
       onSendMessage(aiMsg);
+    } catch (err: any) {
+      const errorMsg: GroupChatMessage = {
+        id: `msg_err_${Date.now()}`,
+        projectId: model.id,
+        senderType: 'senior_ai',
+        senderId: 'senior_ai_mentor',
+        senderName: 'Arq. IA Senior (Mentor PUDS)',
+        senderRole: 'Senior AI Mentor',
+        senderColor: '#f59e0b',
+        targetUserName: askingPerson.name,
+        targetUserRole: askingPerson.role,
+        text: `⚠️ **No pude usar ese motor externo:** ${err?.message || 'Error de conexión con la API.'}\n\nPuedes pegar otra API Key (` + '`AIzaSy...`' + `) en **⚙️** o cambiar a **IA Local (Ollama / Motor PUDS)**.`,
+        timestamp: Date.now(),
+        aiMetadata: {
+          mode: aiConfig.mode,
+          providerUsed: 'Aviso de Motor IA',
+          contextSummary: `${model.name}`,
+          addressedTo: askingPerson.name,
+          addressedRole: askingPerson.role
+        }
+      };
+      onSendMessage(errorMsg);
     } finally {
       setIsAIThinking(false);
     }
