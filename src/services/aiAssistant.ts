@@ -1335,12 +1335,11 @@ Responde ÚNICAMENTE con un JSON válido con esta estructura exacta (sin markdow
 
   if ((engine === 'gemini' || engine === 'auto') && effectiveGeminiKey) {
     const MODELS_TO_TRY = [
-      'gemini-2.5-flash',
-      'gemini-2.0-flash',
+      'gemini-3.8-flash',
       'gemini-3.5-flash',
       'gemini-3.6-flash',
       'gemini-flash-latest',
-      'gemini-1.5-flash'
+      'gemini-2.5-flash'
     ];
     let lastGeminiError = '';
 
