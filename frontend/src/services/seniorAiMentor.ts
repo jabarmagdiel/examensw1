@@ -727,14 +727,158 @@ export async function generateSeniorMentorReply(params: {
   const normalizedPrompt = lower.normalize('NFD').replace(/[\u0300-\u036f]/g, '');
   const shortName = askingUser.name.split(' ')[0] || askingUser.name;
 
-  // 0. Si el usuario adjuntó una imagen de un diagrama en el chat colaborativo, digitalizarlo (Ollama Vision Local / Motor Visual Local) y proponer exportarlo al lienzo general
+  // 0. Si el usuario adjuntó una imagen de un diagrama en el chat colaborativo, leer la imagen con Ollama Vision / OCR Local y ejecutar la acción exacta solicitada
   if (imageDataUrl) {
-    const scanResult = await processDiagramPhoto(imageDataUrl, prompt);
+    const scanResult = await processDiagramPhoto(imageDataUrl, prompt, model.entities);
+    const matchedOnCanvas = scanResult.matchedExistingEntities;
+    const primaryTarget = matchedOnCanvas[0] || (scanResult.entities[0] ? model.entities.find(e => e.name.toLowerCase() === scanResult.entities[0].name.toLowerCase()) : undefined);
+
+    const wantsDeleteClass =
+      /\b(borra|borrar|elimina|eliminar|quita|quitar|remueve|remover|saca|sacar|delete)\b/.test(normalizedPrompt) &&
+      !normalizedPrompt.includes('atributo') &&
+      !normalizedPrompt.includes('campo') &&
+      !normalizedPrompt.includes('columna');
+
+    const wantsEditClass =
+      /\b(agrega|agregar|aumenta|aumentar|anade|anadir|pon|ponle|edita|editar|modifica|modificar|cambia|cambiar|renombra|renombrar)\b/.test(normalizedPrompt) &&
+      !normalizedPrompt.includes('al lienzo') &&
+      !normalizedPrompt.includes('nuevo');
+
+    const wantsOnlyInspection =
+      /\b(que ves|que dice|que clase|explica|revisa|analiza|falta|falten|recomienda)\b/.test(normalizedPrompt) &&
+      !normalizedPrompt.includes('export') &&
+      !normalizedPrompt.includes('pasa al lienzo') &&
+      !normalizedPrompt.includes('carga al lienzo');
+
+    // A. Caso: "borra esa clase" / "elimina la clase de la foto"
+    if (wantsDeleteClass) {
+      const targetsToDelete =
+        matchedOnCanvas.length > 0
+          ? matchedOnCanvas
+          : primaryTarget
+          ? [primaryTarget]
+          : selectedEntity
+          ? [selectedEntity]
+          : [];
+
+      if (targetsToDelete.length === 0) {
+        const ocrDetectedNames = scanResult.entities.map(e => `**\`${e.name}\`**`).join(', ');
+        return {
+          text:
+            ocrDetectedNames
+              ? `Leí ${ocrDetectedNames} en tu imagen (**${shortName}**), pero no encontré esa clase en el lienzo actual de **${model.name}**, así que no borré nada.`
+              : `No logré identificar en el lienzo actual de **${model.name}** qué clase quieres borrar con esa captura (${scanResult.summary}). Dime el nombre exacto (ej. *"borra la clase Reserva"*) y la quito al instante.`,
+          providerUsed: scanResult.providerUsed,
+          autoApply: false
+        };
+      }
+
+      const deleteIds = new Set(targetsToDelete.map(t => t.id));
+      const remainingEntities = model.entities.filter(e => !deleteIds.has(e.id));
+      const remainingRelationships = model.relationships.filter(
+        r => !deleteIds.has(r.sourceEntityId) && !deleteIds.has(r.targetEntityId)
+      );
+      const deletedNames = targetsToDelete.map(t => `\`${t.name}\``).join(', ');
+      const deleteProposal = {
+        entities: remainingEntities,
+        relationships: remainingRelationships,
+        summary: `Eliminar clase(s) ${targetsToDelete.map(t => t.name).join(', ')} detectada(s) en la captura`
+      };
+
+      if (config.mode === 'mentor') {
+        return {
+          text: `Identifiqué ${deletedNames} en la imagen, **${shortName}**. Estás en **Modo Mentor**, así que no la borré automáticamente; si confirmas que no afecta tus relaciones actuales, pásame a **Copiloto** o **Solucionador Directo**.`,
+          providerUsed: scanResult.providerUsed,
+          autoApply: false
+        };
+      }
+
+      return {
+        text:
+          config.mode === 'solver'
+            ? `Listo **${shortName}**, reconocí ${deletedNames} en tu imagen y ya la eliminé del diagrama junto con sus relaciones.`
+            : `Identifiqué ${deletedNames} en la captura, **${shortName}**. Dale al botón verde de abajo para confirmar y borrarla del diagrama.`,
+        providerUsed: scanResult.providerUsed,
+        proposedChange: deleteProposal,
+        autoApply: config.mode === 'solver'
+      };
+    }
+
+    // B. Caso: Editar una clase que YA existe en el lienzo y mostraron en la captura (ej. "agrega email a esa clase")
+    if (wantsEditClass && primaryTarget) {
+      const resolvedPrompt = prompt.replace(/\b(esa clase|esta clase|la clase de la foto|la foto|esa tabla|esta tabla)\b/gi, primaryTarget.name);
+      const editAttempt = executeVoiceCommand(resolvedPrompt, model);
+      if (editAttempt.actionType !== 'UNKNOWN') {
+        return {
+          text:
+            config.mode === 'solver'
+              ? `Listo **${shortName}**, reconocí **\`${primaryTarget.name}\`** en la imagen y ya apliqué el cambio: ${editAttempt.summary}.`
+              : `Reconocí **\`${primaryTarget.name}\`** en tu captura, **${shortName}**, y preparé la edición: **${editAttempt.summary}**. Confírmala abajo para aplicarla al lienzo.`,
+          providerUsed: scanResult.providerUsed,
+          proposedChange:
+            config.mode === 'mentor'
+              ? undefined
+              : {
+                  entities: editAttempt.model.entities,
+                  relationships: editAttempt.model.relationships,
+                  summary: editAttempt.summary
+                },
+          autoApply: config.mode === 'solver'
+        };
+      }
+    }
+
+    // C. Caso: Solo consultar/revisar qué aparece en la captura sin crear copias falsas
+    if (wantsOnlyInspection) {
+      const targetList = matchedOnCanvas.length > 0 ? matchedOnCanvas : scanResult.entities;
+      if (targetList.length === 0) {
+        return {
+          text: `Revisé la captura, **${shortName}**, pero no detecté bloques UML legibles (${scanResult.summary}).`,
+          providerUsed: scanResult.providerUsed,
+          autoApply: false
+        };
+      }
+      const missingAnalysis = analyzeMissingAttributesPerEntity(
+        { ...model, entities: targetList },
+        targetList.map(e => e.id)
+      );
+      const details = targetList
+        .map(e => `• **\`${e.name}\`**: ${e.attributes.map(a => `\`${a.name}\``).join(', ')}`)
+        .join('\n');
+      const suggestionLine =
+        missingAnalysis.recommendations.length > 0
+          ? `\n\n• **Sugerencias de atributos para aumentar:** ${missingAnalysis.recommendations
+              .map(r => `${r.entity.name} (+${r.suggestedAttributes.map(s => `\`${s.attribute.name}\``).join(', ')})`)
+              .join('; ')}.`
+          : '';
+      return {
+        text: `Esto es lo que leí de tu imagen, **${shortName}**:\n\n${details}${suggestionLine}`,
+        providerUsed: scanResult.providerUsed,
+        proposedChange:
+          config.mode !== 'mentor' && matchedOnCanvas.length > 0 && missingAnalysis.totalAdded > 0
+            ? {
+                entities: model.entities.map(ent => missingAnalysis.proposedEntities.find(p => p.id === ent.id) || ent),
+                relationships: model.relationships,
+                summary: missingAnalysis.summary
+              }
+            : undefined,
+        autoApply: false
+      };
+    }
+
+    // D. Caso: Digitalizar / Exportar diagrama nuevo desde foto al lienzo general
+    if (scanResult.entities.length === 0) {
+      return {
+        text: `Analicé la imagen, **${shortName}**, pero no pude extraer clases UML completas (${scanResult.summary}). Si tienes Ollama local, activa un modelo de visión como \`llama3.2-vision\` o dime qué clases contiene para ayudarte a crearlas.`,
+        providerUsed: scanResult.providerUsed,
+        autoApply: false
+      };
+    }
+
     let workingEntities = scanResult.entities;
     let workingRels = scanResult.relationships;
     let editNote = '';
 
-    // Si además escribió una instrucción de edición junto a la imagen (ej. "agrega atributo email a Paciente"), aplicarla de una vez
     if (prompt.trim()) {
       const tempDiagram: DiagramModel = {
         ...model,
@@ -749,24 +893,25 @@ export async function generateSeniorMentorReply(params: {
       }
     }
 
-    // Fusionar o mantener las clases existentes del lienzo general evitando colisiones visuales
-    const offsetY = model.entities.length > 0 ? 320 : 0;
-    const shiftedEntities = workingEntities.map(e => ({ ...e, y: e.y + offsetY }));
-    const mergedEntities = [...model.entities, ...shiftedEntities];
-    const mergedRels = [...model.relationships, ...workingRels];
+    // Evitar duplicar clases que ya están en el lienzo con el mismo nombre
+    const existingNamesLower = new Set(model.entities.map(e => e.name.toLowerCase()));
+    const newEntities = workingEntities.filter(e => !existingNamesLower.has(e.name.toLowerCase()));
+    const entitiesToInsert = newEntities.length > 0 ? newEntities : workingEntities;
 
+    const offsetY = model.entities.length > 0 ? 320 : 0;
+    const shiftedEntities = entitiesToInsert.map(e => ({ ...e, y: e.y + offsetY }));
     const replaceMode =
       normalizedPrompt.includes('reemplaza') ||
       normalizedPrompt.includes('nuevo lienzo') ||
       normalizedPrompt.includes('solo este');
 
-    const finalEntities = replaceMode ? workingEntities : mergedEntities;
-    const finalRels = replaceMode ? workingRels : mergedRels;
+    const finalEntities = replaceMode ? workingEntities : [...model.entities, ...shiftedEntities];
+    const finalRels = replaceMode ? workingRels : [...model.relationships, ...workingRels];
 
     const imageProposedChange = {
       entities: finalEntities,
       relationships: finalRels,
-      summary: `Exportar al lienzo general ${workingEntities.length} clases y ${workingRels.length} relaciones desde imagen UML`
+      summary: `Exportar al lienzo general ${entitiesToInsert.length} clase(s) UML desde imagen`
     };
 
     const classListText = workingEntities
@@ -775,15 +920,13 @@ export async function generateSeniorMentorReply(params: {
 
     return {
       text:
-        `Listo **${shortName}**, ya analicé la imagen del diagrama que enviaste al chat:\n\n` +
+        `Listo **${shortName}**, esto fue lo que leí en tu imagen:\n\n` +
         `${classListText}\n\n` +
         `• **Relaciones detectadas:** ${workingRels.length}${editNote}\n\n` +
         (config.mode === 'solver'
-          ? `⚡ Ya exporté automáticamente estas **${workingEntities.length} clases UML 2.5** al lienzo general.`
-          : `✨ Haz clic en **"Aplicar Solución del Senior al Diagrama"** abajo para exportar estas **${workingEntities.length} clases UML 2.5** directo al lienzo general (o dime qué atributo/relación quieres que edite antes).`),
-      providerUsed: scanResult.summary.includes('Ollama')
-        ? 'Ollama Vision Local'
-        : 'Motor Visual Local PUDS (100% Local)',
+          ? `⚡ Ya pasé estas **${entitiesToInsert.length} clase(s) UML 2.5** al lienzo general.`
+          : `✨ Dale al botón **"Aplicar Solución del Senior al Diagrama"** abajo si quieres pasarlas al lienzo general (o dime qué quieres editarles primero).`),
+      providerUsed: scanResult.providerUsed,
       proposedChange: config.mode === 'mentor' ? undefined : imageProposedChange,
       autoApply: config.mode === 'solver'
     };
@@ -826,8 +969,31 @@ export async function generateSeniorMentorReply(params: {
     mentionedEntities.length > 0 ? mentionedEntities.map(e => e.id) : undefined
   );
 
-  // 1. Verificar si la instrucción del usuario pide una modificación directa al diagrama (ej. "crear tabla...", "agregar atributo...", "relacionar...")
-  const directCommandResult = executeVoiceCommand(prompt, model);
+  // 1. Verificar si la instrucción del usuario pide una modificación directa al diagrama (crear, editar o eliminar clase)
+  let directCommandResult = executeVoiceCommand(prompt, model);
+
+  // Soporte directo para eliminar una clase mencionada o seleccionada (ej. "borra la clase Reserva", "elimina Reserva")
+  const wantsTextDelete =
+    /\b(borra|borrar|elimina|eliminar|quita|quitar|remueve|remover|delete)\b/.test(normalizedPrompt) &&
+    !normalizedPrompt.includes('atributo') &&
+    !normalizedPrompt.includes('campo') &&
+    !normalizedPrompt.includes('columna');
+
+  if (directCommandResult.actionType === 'UNKNOWN' && wantsTextDelete) {
+    const targetToDelete = mentionedEntities[0] || selectedEntity;
+    if (targetToDelete) {
+      const remainingEntities = model.entities.filter(e => e.id !== targetToDelete.id);
+      const remainingRels = model.relationships.filter(
+        r => r.sourceEntityId !== targetToDelete.id && r.targetEntityId !== targetToDelete.id
+      );
+      directCommandResult = {
+        model: { ...model, entities: remainingEntities, relationships: remainingRels, updatedAt: Date.now() },
+        summary: `Clase "${targetToDelete.name}" eliminada del diagrama junto con sus relaciones.`,
+        actionType: 'DELETE_ENTITY' as any
+      };
+    }
+  }
+
   let proposedChange: { entities: Entity[]; relationships: Relationship[]; summary: string } | undefined;
 
   if (directCommandResult.actionType !== 'UNKNOWN') {

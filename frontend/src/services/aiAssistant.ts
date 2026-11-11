@@ -953,26 +953,281 @@ function buildParsedDiagramResult(
 }
 
 /**
+ * Ejecuta OCR 100% local en el navegador con Tesseract.js sobre la imagen,
+ * invirtiendo automáticamente capturas oscuras y aumentando el contraste para leer texto UML real.
+ */
+async function runLocalImageOCR(imageDataUrl: string): Promise<string> {
+  let processedUrl = imageDataUrl;
+  try {
+    const img = await new Promise<HTMLImageElement>((resolve, reject) => {
+      const i = new Image();
+      i.onload = () => resolve(i);
+      i.onerror = reject;
+      i.src = imageDataUrl;
+    });
+
+    const scale = img.width < 900 ? 2 : 1.5;
+    const canvas = document.createElement('canvas');
+    canvas.width = Math.round(img.width * scale);
+    canvas.height = Math.round(img.height * scale);
+    const ctx = canvas.getContext('2d');
+    if (ctx) {
+      ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
+      const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
+      const data = imageData.data;
+
+      let totalLum = 0;
+      const pixelCount = data.length / 4;
+      for (let i = 0; i < data.length; i += 4) {
+        totalLum += 0.299 * data[i] + 0.587 * data[i + 1] + 0.114 * data[i + 2];
+      }
+      const avgLum = totalLum / Math.max(1, pixelCount);
+      const isDarkBg = avgLum < 128;
+
+      for (let i = 0; i < data.length; i += 4) {
+        let gray = 0.299 * data[i] + 0.587 * data[i + 1] + 0.114 * data[i + 2];
+        if (isDarkBg) gray = 255 - gray;
+        // Aumentar contraste para OCR limpio
+        const contrasted = gray < 150 ? Math.max(0, gray * 0.65) : Math.min(255, gray * 1.15 + 25);
+        data[i] = contrasted;
+        data[i + 1] = contrasted;
+        data[i + 2] = contrasted;
+      }
+      ctx.putImageData(imageData, 0, 0);
+      processedUrl = canvas.toDataURL('image/png');
+    }
+  } catch {
+    processedUrl = imageDataUrl;
+  }
+
+  try {
+    const tesseractMod: any = await import('tesseract.js');
+    const recognizeFn = tesseractMod.recognize || tesseractMod.default?.recognize;
+    if (typeof recognizeFn === 'function') {
+      const result = await recognizeFn(processedUrl, 'eng');
+      return result?.data?.text || '';
+    }
+  } catch (err) {
+    console.warn('Error en OCR local Tesseract:', err);
+  }
+  return '';
+}
+
+function normalizeOcrToken(str: string): string {
+  return str
+    .toLowerCase()
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .replace(/[^a-z0-9_]/g, '');
+}
+
+/**
+ * Encuentra qué entidades reales del lienzo actual aparecen en el texto OCR o en la respuesta de visión.
+ */
+export function matchEntitiesInImageText(ocrText: string, existingEntities: Entity[]): Entity[] {
+  const normalizedText = normalizeOcrToken(ocrText);
+  const ocrLines = ocrText
+    .split(/\r?\n/)
+    .map(l => l.trim())
+    .filter(Boolean);
+
+  const scored = existingEntities.map(ent => {
+    const cleanName = normalizeOcrToken(ent.name);
+    let score = 0;
+    if (cleanName.length >= 3 && normalizedText.includes(cleanName)) {
+      score += 12;
+    }
+    // Coincidencia por línea exacta o parcial
+    ocrLines.forEach(line => {
+      const normLine = normalizeOcrToken(line);
+      if (cleanName.length >= 3 && normLine === cleanName) score += 10;
+    });
+    // Coincidencia de atributos propios (evitando 'id' genérico)
+    ent.attributes.forEach(attr => {
+      const cleanAttr = normalizeOcrToken(attr.name);
+      if (cleanAttr.length >= 4 && normalizedText.includes(cleanAttr)) {
+        score += 3;
+      }
+    });
+    return { entity: ent, score };
+  });
+
+  return scored
+    .filter(s => s.score >= 10)
+    .sort((a, b) => b.score - a.score)
+    .map(s => s.entity);
+}
+
+/**
+ * Parsea texto OCR extraído de una foto/captura de diagrama UML en entidades y atributos reales.
+ */
+function parseEntitiesFromOcrText(ocrText: string): {
+  entities: Array<{
+    name: string;
+    tableName: string;
+    attributes: Array<{ name: string; type: string; isPrimaryKey: boolean; isForeignKey?: boolean; isNullable: boolean }>;
+  }>;
+  relationships: Array<{ sourceName: string; targetName: string; cardinality: string; type?: string; name: string }>;
+} {
+  const rawLines = ocrText
+    .split(/\r?\n/)
+    .map(l => l.replace(/[|©®™•●◆◇▷]/g, ' ').replace(/\s+/g, ' ').trim())
+    .filter(l => l.length >= 2);
+
+  const entities: Array<{
+    name: string;
+    tableName: string;
+    attributes: Array<{ name: string; type: string; isPrimaryKey: boolean; isForeignKey?: boolean; isNullable: boolean }>;
+  }> = [];
+
+  let currentEntity: (typeof entities)[number] | null = null;
+
+  const ignoredTokens = new Set([
+    'pk', 'fk', 'uk', 'id', 'class', 'entity', 'table', 'tabla',
+    'uml', 'association', 'aggregation', 'composition', 'void', 'boolean', 'string', 'integer', 'long'
+  ]);
+
+  const inferTypeFromNameAndLine = (attrName: string, lineLower: string): DataType => {
+    if (lineLower.includes('bigint') || lineLower.includes('long') || attrName.toLowerCase() === 'id' || attrName.toLowerCase().endsWith('_id')) return 'BIGINT';
+    if (lineLower.includes('int')) return 'INTEGER';
+    if (lineLower.includes('decimal') || lineLower.includes('float') || lineLower.includes('real') || /monto|precio|costo|total|peso|saldo/.test(attrName.toLowerCase())) return 'DECIMAL';
+    if (lineLower.includes('bool') || /^(es|is|activo|esterilizado)/.test(attrName.toLowerCase())) return 'BOOLEAN';
+    if (lineLower.includes('timestamp') || lineLower.includes('datetime') || /fechaactualizacion|createdat|updatedat|fechahora/.test(attrName.toLowerCase())) return 'TIMESTAMP';
+    if (lineLower.includes('date') || /fecha/.test(attrName.toLowerCase())) return 'DATE';
+    if (lineLower.includes('text') || /descripcion|observacion|diagnostico|tratamiento/.test(attrName.toLowerCase())) return 'TEXT';
+    return 'VARCHAR';
+  };
+
+  for (const line of rawLines) {
+    const cleanAlphaNum = line.replace(/[^a-zA-Z0-9_áéíóúñÁÉÍÓÚÑ:+\-# ]/g, '').trim();
+    if (!cleanAlphaNum || /^1:N|1:1|N:M|\*$/i.test(cleanAlphaNum)) continue;
+    // Saltar líneas de estereotipos o botones de UI
+    if (/^(class\s*\/\s*entity|class|entity)$/i.test(cleanAlphaNum)) continue;
+
+    // Detectar atributo explícito: "PK id", "- nombre : VARCHAR", "+ id: Long [PK]", "fechaActualizacion"
+    const pkMatch = cleanAlphaNum.match(/^(?:pk|\[pk\]|ap\s*pk|p\s*k)\s+([a-zA-Z_][a-zA-Z0-9_]*)/i);
+    const fkMatch = cleanAlphaNum.match(/^(?:fk|\[fk\])\s+([a-zA-Z_][a-zA-Z0-9_]*)/i);
+    const umlAttrMatch = cleanAlphaNum.match(/^[-+#~]\s*([a-zA-Z_][a-zA-Z0-9_]*)\s*(?::\s*([a-zA-Z0-9_()]+))?/);
+
+    if (pkMatch) {
+      if (!currentEntity) {
+        currentEntity = { name: 'ClaseDetectada', tableName: 'clase_detectada', attributes: [] };
+        entities.push(currentEntity);
+      }
+      const attrName = pkMatch[1];
+      if (!currentEntity.attributes.some(a => a.name.toLowerCase() === attrName.toLowerCase())) {
+        currentEntity.attributes.push({ name: attrName, type: 'BIGINT', isPrimaryKey: true, isNullable: false });
+      }
+      continue;
+    }
+
+    if (fkMatch && currentEntity) {
+      const attrName = fkMatch[1];
+      if (!currentEntity.attributes.some(a => a.name.toLowerCase() === attrName.toLowerCase())) {
+        currentEntity.attributes.push({ name: attrName, type: 'BIGINT', isPrimaryKey: false, isForeignKey: true, isNullable: false });
+      }
+      continue;
+    }
+
+    if (umlAttrMatch) {
+      const attrName = umlAttrMatch[1];
+      if (cleanAlphaNum.includes('(')) continue; // Es método/operación, no atributo
+      if (!currentEntity) {
+        currentEntity = { name: 'ClaseDetectada', tableName: 'clase_detectada', attributes: [] };
+        entities.push(currentEntity);
+      }
+      const isPK = /\[pk\]|\{id\}|^id$/i.test(cleanAlphaNum) || attrName.toLowerCase() === 'id';
+      const isFK = /\[fk\]|\{fk\}|_id$/i.test(cleanAlphaNum) && !isPK;
+      if (!currentEntity.attributes.some(a => a.name.toLowerCase() === attrName.toLowerCase())) {
+        currentEntity.attributes.push({
+          name: attrName,
+          type: inferTypeFromNameAndLine(attrName, cleanAlphaNum.toLowerCase()),
+          isPrimaryKey: isPK,
+          isForeignKey: isFK,
+          isNullable: /\[0\.\.1\]|\?/.test(cleanAlphaNum)
+        });
+      }
+      continue;
+    }
+
+    // Token simple sin espacios ni símbolos (ej. "Reserva", "nombre", "estado", "fechaActualizacion")
+    const singleTokenMatch = cleanAlphaNum.match(/^([a-zA-ZÁÉÍÓÚÑáéíóúñ][a-zA-Z0-9_]*)$/);
+    if (singleTokenMatch) {
+      const word = singleTokenMatch[1];
+      const lowerWord = word.toLowerCase();
+      if (ignoredTokens.has(lowerWord)) {
+        if (lowerWord === 'id' && currentEntity && !currentEntity.attributes.some(a => a.name === 'id')) {
+          currentEntity.attributes.push({ name: 'id', type: 'BIGINT', isPrimaryKey: true, isNullable: false });
+        }
+        continue;
+      }
+
+      const startsUpper = /^[A-ZÁÉÍÓÚÑ]/.test(word);
+      const isNewClassHeader = startsUpper && (!currentEntity || currentEntity.attributes.length >= 1 || entities.length === 0);
+
+      if (isNewClassHeader && word.length >= 3) {
+        currentEntity = {
+          name: word,
+          tableName: word.toLowerCase(),
+          attributes: []
+        };
+        entities.push(currentEntity);
+      } else if (currentEntity) {
+        const isFK = lowerWord.endsWith('_id');
+        if (!currentEntity.attributes.some(a => a.name.toLowerCase() === lowerWord)) {
+          currentEntity.attributes.push({
+            name: word,
+            type: inferTypeFromNameAndLine(word, lowerWord),
+            isPrimaryKey: lowerWord === 'id',
+            isForeignKey: isFK,
+            isNullable: false
+          });
+        }
+      }
+    }
+  }
+
+  // Asegurar que ninguna clase quede sin id si tiene atributos y limpiar clases vacías si hay otras válidas
+  const validEntities = entities
+    .filter(e => e.name !== 'ClaseDetectada' || e.attributes.length > 0)
+    .map(e => {
+      if (e.attributes.length === 0) {
+        return {
+          ...e,
+          attributes: [{ name: 'id', type: 'BIGINT', isPrimaryKey: true, isNullable: false }]
+        };
+      }
+      return e;
+    });
+
+  return { entities: validEntities, relationships: [] };
+}
+
+/**
  * Digitaliza una foto o captura de diagrama de clases UML.
  * Prioridad 100% LOCAL:
  * 1) Ollama Vision Local (llama3.2-vision / llava / qwen2.5vl)
  * 2) Gemini Vision (solo si el usuario configuró manualmente su API Key en ⚙️)
- * 3) Motor Visual Local PUDS Offline (extrae estructura sin bloquear nunca por falta de API)
+ * 3) OCR Local en navegador (Tesseract.js con preprocesado para capturas claras y oscuras)
  */
 export async function processDiagramPhoto(
   imageDataUrl: string,
-  hintText?: string
+  hintText?: string,
+  existingEntities: Entity[] = []
 ): Promise<{
   entities: Entity[];
   relationships: Relationship[];
+  matchedExistingEntities: Entity[];
+  ocrText: string;
   summary: string;
+  providerUsed: string;
 }> {
   const base64Image = imageDataUrl.split(',')[1] || '';
   const mimeType = imageDataUrl.split(';')[0]?.split(':')[1] || 'image/png';
 
   const visionPrompt = `Analiza esta imagen de un diagrama de clases UML 2.5 (dibujado a mano, pizarra o captura).
-Extrae todas las clases/entidades, atributos, métodos y relaciones UML.
-${hintText ? `Contexto adicional del usuario: "${hintText}"` : ''}
+Extrae todas las clases/entidades, atributos, métodos y relaciones UML exactamente como aparecen en la imagen (NO inventes clases que no estén en la imagen).
+${hintText ? `Contexto o petición del usuario: "${hintText}"` : ''}
 Responde ÚNICAMENTE con un JSON válido con esta estructura exacta (sin markdown):
 {
   "entities": [
@@ -1007,8 +1262,7 @@ Responde ÚNICAMENTE con un JSON válido con esta estructura exacta (sin markdow
     if (tagsRes.ok) {
       const tagsData = await tagsRes.json();
       const installedModels: string[] = (tagsData?.models || []).map((m: any) => m.name || m.model || '');
-      const visionModel =
-        installedModels.find(m => /vision|llava|vl|minicpm|moondream|gemma3/i.test(m)) || installedModels[0];
+      const visionModel = installedModels.find(m => /vision|llava|vl|minicpm|moondream|gemma3/i.test(m));
 
       if (visionModel) {
         const ollamaRes = await fetch(`${localEndpoint}/api/chat`, {
@@ -1037,14 +1291,21 @@ Responde ÚNICAMENTE con un JSON válido con esta estructura exacta (sin markdow
             clean = clean.slice(f, l + 1);
             const parsed = JSON.parse(clean);
             if (Array.isArray(parsed?.entities) && parsed.entities.length > 0) {
-              return buildParsedDiagramResult(parsed, `Ollama Vision Local (${visionModel})`);
+              const built = buildParsedDiagramResult(parsed, `Ollama Vision Local (${visionModel})`);
+              const namesText = parsed.entities.map((e: any) => e.name).join(' ');
+              return {
+                ...built,
+                matchedExistingEntities: matchEntitiesInImageText(namesText, existingEntities),
+                ocrText: namesText,
+                providerUsed: `Ollama Vision Local (${visionModel})`
+              };
             }
           }
         }
       }
     }
   } catch {
-    // Ollama local no disponible -> continuar con respaldo
+    // Ollama Vision no disponible -> continuar con OCR local
   }
 
   // 2. Intentar Gemini Vision solo si el usuario configuró manualmente su propia API Key en ⚙️
@@ -1090,164 +1351,61 @@ Responde ÚNICAMENTE con un JSON válido con esta estructura exacta (sin markdow
           if (f !== -1 && l > f) jsonText = jsonText.slice(f, l + 1);
           const parsed = JSON.parse(jsonText);
           if (Array.isArray(parsed?.entities) && parsed.entities.length > 0) {
-            return buildParsedDiagramResult(parsed, `Gemini Vision (${model})`);
+            const built = buildParsedDiagramResult(parsed, `Gemini Vision (${model})`);
+            const namesText = parsed.entities.map((e: any) => e.name).join(' ');
+            return {
+              ...built,
+              matchedExistingEntities: matchEntitiesInImageText(namesText, existingEntities),
+              ocrText: namesText,
+              providerUsed: `Gemini Vision (${model})`
+            };
           }
         }
       } catch {}
     }
   }
 
-  // 3. Analizador Visual Local PUDS Offline (100% local sin depender de APIs externas)
-  // Detecta bloques en la imagen y/o palabras clave en la descripción para construir un diagrama UML 2.5 editable inmediatamente.
-  let detectedRegions = 2;
-  try {
-    const img = await new Promise<HTMLImageElement>((resolve, reject) => {
-      const i = new Image();
-      i.onload = () => resolve(i);
-      i.onerror = reject;
-      i.src = imageDataUrl;
-    });
-    const probeCanvas = document.createElement('canvas');
-    probeCanvas.width = 120;
-    probeCanvas.height = 80;
-    const ctx = probeCanvas.getContext('2d');
-    if (ctx) {
-      ctx.drawImage(img, 0, 0, 120, 80);
-      const data = ctx.getImageData(0, 0, 120, 80).data;
-      // Medir cuadrantes con densidad de trazos/texto para estimar cantidad de clases dibujadas
-      const quadrants = [0, 0, 0, 0];
-      for (let y = 0; y < 80; y++) {
-        for (let x = 0; x < 120; x++) {
-          const idx = (y * 120 + x) * 4;
-          const lum = (data[idx] + data[idx + 1] + data[idx + 2]) / 3;
-          const isEdge = lum < 175 && lum > 15;
-          if (isEdge) {
-            const q = (y >= 40 ? 2 : 0) + (x >= 60 ? 1 : 0);
-            quadrants[q]++;
-          }
-        }
-      }
-      const activeQ = quadrants.filter(c => c > 45).length;
-      detectedRegions = Math.max(2, Math.min(4, activeQ));
-    }
-  } catch {}
+  // 3. OCR 100% Local en navegador (Tesseract.js) — Lee el texto real de la imagen sin inventar clases falsas
+  const ocrText = await runLocalImageOCR(imageDataUrl);
+  const matchedExistingEntities = matchEntitiesInImageText(ocrText, existingEntities);
+  const ocrParsed = parseEntitiesFromOcrText(ocrText);
 
-  const hintLower = (hintText || '').toLowerCase();
-  // Si el usuario nombró clases en el comentario junto a la imagen, usarlas directamente
-  const customClassMatches = (hintText || '').match(/\b[A-ZÁÉÍÓÚÑ][a-zA-Z0-9áéíóúñÁÉÍÓÚÑ]{2,}\b/g);
-  const stopWords = new Set(['Diagrama', 'Clases', 'Imagen', 'Foto', 'Agrega', 'Genera', 'Edita', 'Exporta', 'Lienzo', 'Sistema', 'UML']);
-  const namedClasses = Array.from(new Set((customClassMatches || []).filter(w => !stopWords.has(w))));
-
-  if (namedClasses.length >= 2) {
-    const ents = namedClasses.slice(0, 5).map((name, idx) => ({
-      name,
-      tableName: name.toLowerCase(),
-      attributes: [
-        { name: 'id', type: 'BIGINT', isPrimaryKey: true, isNullable: false },
-        { name: idx === 0 ? 'nombre' : 'descripcion', type: 'VARCHAR', isPrimaryKey: false, isNullable: false },
-        ...(idx > 0 ? [{ name: `${namedClasses[0].toLowerCase()}_id`, type: 'BIGINT', isPrimaryKey: false, isForeignKey: true, isNullable: false }] : []),
-        { name: 'fechaRegistro', type: 'TIMESTAMP', isPrimaryKey: false, isNullable: false }
-      ]
-    }));
-    const rels = ents.slice(1).map(e => ({
-      sourceName: ents[0].name,
-      targetName: e.name,
-      cardinality: '1:N',
-      type: 'association',
-      name: 'asocia'
-    }));
-    return buildParsedDiagramResult(
+  if (ocrParsed.entities.length > 0) {
+    const built = buildParsedDiagramResult(
       {
-        entities: ents,
-        relationships: rels,
-        summary: `Motor Visual Local PUDS analizó la imagen (${ents.length} clases UML detectadas: ${ents.map(e => e.name).join(', ')}). Puedes editarlas o pedir cambios a la IA antes de exportar al lienzo.`
+        entities: ocrParsed.entities,
+        relationships: ocrParsed.relationships,
+        summary: `OCR Local leyó ${ocrParsed.entities.length} clase(s) de la imagen: ${ocrParsed.entities.map(e => e.name).join(', ')}.`
       },
-      'Motor Visual Local PUDS'
+      'OCR Local PUDS'
     );
+    return {
+      ...built,
+      matchedExistingEntities,
+      ocrText,
+      providerUsed: 'OCR Visual Local (Tesseract.js)'
+    };
   }
 
-  // Detectar si es la pizarra médica/clínica o generar estructura UML 2.5 acorde a las regiones detectadas
-  const isMedicalSketch = hintLower.includes('paciente') || hintLower.includes('doctor') || hintLower.includes('medic');
-  if (isMedicalSketch || detectedRegions === 2) {
-    return buildParsedDiagramResult(
-      {
-        entities: [
-          {
-            name: 'Paciente',
-            tableName: 'pacientes',
-            attributes: [
-              { name: 'id', type: 'BIGINT', isPrimaryKey: true, isNullable: false },
-              { name: 'nombre', type: 'VARCHAR', isPrimaryKey: false, isNullable: false },
-              { name: 'documento', type: 'VARCHAR', isPrimaryKey: false, isNullable: false }
-            ]
-          },
-          {
-            name: 'Doctor',
-            tableName: 'doctores',
-            attributes: [
-              { name: 'id', type: 'BIGINT', isPrimaryKey: true, isNullable: false },
-              { name: 'nombre', type: 'VARCHAR', isPrimaryKey: false, isNullable: false },
-              { name: 'especialidad', type: 'VARCHAR', isPrimaryKey: false, isNullable: false },
-              { name: 'paciente_id', type: 'BIGINT', isPrimaryKey: false, isForeignKey: true, isNullable: true }
-            ]
-          }
-        ],
-        relationships: [
-          { sourceName: 'Paciente', targetName: 'Doctor', cardinality: '1:N', type: 'association', name: 'atiende' }
-        ],
-        summary:
-          'Motor Visual Local PUDS detectó 2 bloques de clase UML (Paciente 1:N Doctor) en la imagen cargada. Puedes editar clases/atributos con la IA o aplicarlos al lienzo general.'
-      },
-      'Motor Visual Local PUDS'
-    );
+  if (matchedExistingEntities.length > 0) {
+    return {
+      entities: matchedExistingEntities,
+      relationships: [],
+      matchedExistingEntities,
+      ocrText,
+      summary: `OCR Local identificó la(s) clase(s) del lienzo en tu captura: ${matchedExistingEntities.map(e => e.name).join(', ')}.`,
+      providerUsed: 'OCR Visual Local (Tesseract.js)'
+    };
   }
 
-  const baseEntities = [
-    {
-      name: 'EntidadPrincipal',
-      tableName: 'entidades_principales',
-      attributes: [
-        { name: 'id', type: 'BIGINT', isPrimaryKey: true, isNullable: false },
-        { name: 'codigo', type: 'VARCHAR', isPrimaryKey: false, isNullable: false },
-        { name: 'nombre', type: 'VARCHAR', isPrimaryKey: false, isNullable: false }
-      ]
-    },
-    {
-      name: 'DetalleRegistro',
-      tableName: 'detalles_registro',
-      attributes: [
-        { name: 'id', type: 'BIGINT', isPrimaryKey: true, isNullable: false },
-        { name: 'descripcion', type: 'TEXT', isPrimaryKey: false, isNullable: false },
-        { name: 'entidadprincipal_id', type: 'BIGINT', isPrimaryKey: false, isForeignKey: true, isNullable: false }
-      ]
-    },
-    ...(detectedRegions >= 3
-      ? [
-          {
-            name: 'Categoria',
-            tableName: 'categorias',
-            attributes: [
-              { name: 'id', type: 'BIGINT', isPrimaryKey: true, isNullable: false },
-              { name: 'titulo', type: 'VARCHAR', isPrimaryKey: false, isNullable: false }
-            ]
-          }
-        ]
-      : [])
-  ];
-
-  const baseRelationships = [
-    { sourceName: 'EntidadPrincipal', targetName: 'DetalleRegistro', cardinality: '1:N', type: 'composition', name: 'contiene' },
-    ...(detectedRegions >= 3
-      ? [{ sourceName: 'Categoria', targetName: 'EntidadPrincipal', cardinality: '1:N', type: 'association', name: 'clasifica' }]
-      : [])
-  ];
-
-  return buildParsedDiagramResult(
-    {
-      entities: baseEntities,
-      relationships: baseRelationships,
-      summary: `Motor Visual Local PUDS detectó ${baseEntities.length} bloques de clase UML 2.5 en la imagen. Escribe qué deseas editar o aplícalo al lienzo general.`
-    },
-    'Motor Visual Local PUDS'
-  );
+  return {
+    entities: [],
+    relationships: [],
+    matchedExistingEntities: [],
+    ocrText,
+    summary: ocrText.trim()
+      ? `Leí este texto en la imagen pero no reconocí bloques de clases completos: "${ocrText.trim().slice(0, 140)}".`
+      : 'No pude leer texto legible en esta imagen. Intenta subir una captura más nítida o instalar un modelo de visión local en Ollama (llama3.2-vision).',
+    providerUsed: 'OCR Visual Local (Tesseract.js)'
+  };
 }
