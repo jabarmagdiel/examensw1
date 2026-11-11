@@ -727,9 +727,12 @@ export async function generateSeniorMentorReply(params: {
   const normalizedPrompt = lower.normalize('NFD').replace(/[\u0300-\u036f]/g, '');
   const shortName = askingUser.name.split(' ')[0] || askingUser.name;
 
-  // 0. Si el usuario adjuntó una imagen de un diagrama en el chat colaborativo, leer la imagen con Ollama Vision / OCR Local y ejecutar la acción exacta solicitada
+  // 0. Si el usuario adjuntó una imagen de un diagrama en el chat colaborativo, leer la imagen con Ollama Vision / Gemini / OCR Local y ejecutar la acción exacta solicitada
   if (imageDataUrl) {
-    const scanResult = await processDiagramPhoto(imageDataUrl, prompt, model.entities);
+    const scanResult = await processDiagramPhoto(imageDataUrl, prompt, model.entities, {
+      engine: config.provider === 'google_gemini' ? 'gemini' : 'auto',
+      customGeminiApiKey: config.googleApiKey
+    });
     const matchedOnCanvas = scanResult.matchedExistingEntities;
     const primaryTarget = matchedOnCanvas[0] || (scanResult.entities[0] ? model.entities.find(e => e.name.toLowerCase() === scanResult.entities[0].name.toLowerCase()) : undefined);
 

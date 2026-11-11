@@ -1205,15 +1205,16 @@ function parseEntitiesFromOcrText(ocrText: string): {
 
 /**
  * Digitaliza una foto o captura de diagrama de clases UML.
- * Prioridad 100% LOCAL:
- * 1) Ollama Vision Local (llama3.2-vision / llava / qwen2.5vl)
- * 2) Gemini Vision (solo si el usuario configuró manualmente su API Key en ⚙️)
- * 3) OCR Local en navegador (Tesseract.js con preprocesado para capturas claras y oscuras)
+ * Soporta selector de motor:
+ * - 'auto': Ollama Vision Local -> Gemini Vision (si hay API Key) -> OCR Local Tesseract.js
+ * - 'gemini': Google Gemini Vision (usa customGeminiApiKey, localStorage o VITE_GEMINI_API_KEY)
+ * - 'local': 100% Local (Ollama Vision Local -> OCR Local Tesseract.js)
  */
 export async function processDiagramPhoto(
   imageDataUrl: string,
   hintText?: string,
-  existingEntities: Entity[] = []
+  existingEntities: Entity[] = [],
+  options?: { engine?: 'auto' | 'gemini' | 'local'; customGeminiApiKey?: string }
 ): Promise<{
   entities: Entity[];
   relationships: Relationship[];
@@ -1222,6 +1223,7 @@ export async function processDiagramPhoto(
   summary: string;
   providerUsed: string;
 }> {
+  const engine = options?.engine || 'auto';
   const base64Image = imageDataUrl.split(',')[1] || '';
   const mimeType = imageDataUrl.split(';')[0]?.split(':')[1] || 'image/png';
 
@@ -1245,82 +1247,105 @@ Responde ÚNICAMENTE con un JSON válido con esta estructura exacta (sin markdow
   "summary": "Resumen breve en español"
 }`;
 
-  // 1. Intentar Ollama Vision Local primero (http://localhost:11434)
-  try {
-    let localEndpoint = 'http://localhost:11434';
+  // 1. Intentar Ollama Vision Local si engine es 'auto' o 'local'
+  if (engine === 'auto' || engine === 'local') {
     try {
-      const cfgRaw = localStorage.getItem('case_ai_senior_config_v1');
-      if (cfgRaw) {
-        const parsedCfg = JSON.parse(cfgRaw);
-        if (parsedCfg.localEndpoint) {
-          localEndpoint = String(parsedCfg.localEndpoint).replace(/\/api\/chat.*$/, '').replace(/\/v1\/.*$/, '');
+      let localEndpoint = 'http://localhost:11434';
+      try {
+        const cfgRaw = localStorage.getItem('case_ai_senior_config_v1');
+        if (cfgRaw) {
+          const parsedCfg = JSON.parse(cfgRaw);
+          if (parsedCfg.localEndpoint) {
+            localEndpoint = String(parsedCfg.localEndpoint).replace(/\/api\/chat.*$/, '').replace(/\/v1\/.*$/, '');
+          }
         }
-      }
-    } catch {}
+      } catch {}
 
-    const tagsRes = await fetch(`${localEndpoint}/api/tags`, { method: 'GET' });
-    if (tagsRes.ok) {
-      const tagsData = await tagsRes.json();
-      const installedModels: string[] = (tagsData?.models || []).map((m: any) => m.name || m.model || '');
-      const visionModel = installedModels.find(m => /vision|llava|vl|minicpm|moondream|gemma3/i.test(m));
+      const tagsRes = await fetch(`${localEndpoint}/api/tags`, { method: 'GET' });
+      if (tagsRes.ok) {
+        const tagsData = await tagsRes.json();
+        const installedModels: string[] = (tagsData?.models || []).map((m: any) => m.name || m.model || '');
+        const visionModel = installedModels.find(m => /vision|llava|vl|minicpm|moondream|gemma3/i.test(m));
 
-      if (visionModel) {
-        const ollamaRes = await fetch(`${localEndpoint}/api/chat`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            model: visionModel,
-            stream: false,
-            messages: [
-              {
-                role: 'user',
-                content: visionPrompt,
-                images: [base64Image]
+        if (visionModel) {
+          const ollamaRes = await fetch(`${localEndpoint}/api/chat`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              model: visionModel,
+              stream: false,
+              messages: [
+                {
+                  role: 'user',
+                  content: visionPrompt,
+                  images: [base64Image]
+                }
+              ]
+            })
+          });
+
+          if (ollamaRes.ok) {
+            const oData = await ollamaRes.json();
+            const rawText: string = oData?.message?.content || oData?.response || '';
+            let clean = rawText.replace(/```json\s*/gi, '').replace(/```\s*/g, '').trim();
+            const f = clean.indexOf('{');
+            const l = clean.lastIndexOf('}');
+            if (f !== -1 && l > f) {
+              clean = clean.slice(f, l + 1);
+              const parsed = JSON.parse(clean);
+              if (Array.isArray(parsed?.entities) && parsed.entities.length > 0) {
+                const built = buildParsedDiagramResult(parsed, `Ollama Vision Local (${visionModel})`);
+                const namesText = parsed.entities.map((e: any) => e.name).join(' ');
+                return {
+                  ...built,
+                  matchedExistingEntities: matchEntitiesInImageText(namesText, existingEntities),
+                  ocrText: namesText,
+                  providerUsed: `Ollama Vision Local (${visionModel})`
+                };
               }
-            ]
-          })
-        });
-
-        if (ollamaRes.ok) {
-          const oData = await ollamaRes.json();
-          const rawText: string = oData?.message?.content || oData?.response || '';
-          let clean = rawText.replace(/```json\s*/gi, '').replace(/```\s*/g, '').trim();
-          const f = clean.indexOf('{');
-          const l = clean.lastIndexOf('}');
-          if (f !== -1 && l > f) {
-            clean = clean.slice(f, l + 1);
-            const parsed = JSON.parse(clean);
-            if (Array.isArray(parsed?.entities) && parsed.entities.length > 0) {
-              const built = buildParsedDiagramResult(parsed, `Ollama Vision Local (${visionModel})`);
-              const namesText = parsed.entities.map((e: any) => e.name).join(' ');
-              return {
-                ...built,
-                matchedExistingEntities: matchEntitiesInImageText(namesText, existingEntities),
-                ocrText: namesText,
-                providerUsed: `Ollama Vision Local (${visionModel})`
-              };
             }
           }
         }
       }
+    } catch {
+      // Ollama Vision no disponible -> continuar
     }
-  } catch {
-    // Ollama Vision no disponible -> continuar con OCR local
   }
 
-  // 2. Intentar Gemini Vision solo si el usuario configuró manualmente su propia API Key en ⚙️
-  let userCustomGeminiKey = '';
+  // 2. Intentar Gemini Vision si engine es 'gemini' o 'auto'
+  let storedGeminiKey = '';
   try {
     const cfgRaw = localStorage.getItem('case_ai_senior_config_v1');
-    if (cfgRaw) userCustomGeminiKey = JSON.parse(cfgRaw)?.googleApiKey?.trim() || '';
+    if (cfgRaw) storedGeminiKey = JSON.parse(cfgRaw)?.googleApiKey?.trim() || '';
   } catch {}
 
-  if (userCustomGeminiKey) {
-    const MODELS_TO_TRY = ['gemini-2.5-flash', 'gemini-2.0-flash', 'gemini-1.5-flash'];
+  const envGeminiKey = ((import.meta as any).env?.VITE_GEMINI_API_KEY as string | undefined)?.trim() || '';
+  const effectiveGeminiKey =
+    options?.customGeminiApiKey?.trim() ||
+    storedGeminiKey ||
+    (envGeminiKey && envGeminiKey !== 'PEGA_TU_API_KEY_AQUI' ? envGeminiKey : '');
+
+  if (engine === 'gemini' && !effectiveGeminiKey) {
+    throw new Error(
+      'No hay una Gemini API Key configurada. Pégala arriba en el campo de Gemini API Key o cambia al motor "100% Local (Ollama / OCR)".'
+    );
+  }
+
+  if ((engine === 'gemini' || engine === 'auto') && effectiveGeminiKey) {
+    const MODELS_TO_TRY = [
+      'gemini-2.5-flash',
+      'gemini-2.0-flash',
+      'gemini-3.5-flash',
+      'gemini-3.6-flash',
+      'gemini-flash-latest',
+      'gemini-1.5-flash'
+    ];
+    let lastGeminiError = '';
+
     for (const model of MODELS_TO_TRY) {
       try {
         const response = await fetch(
-          `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${encodeURIComponent(userCustomGeminiKey)}`,
+          `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${encodeURIComponent(effectiveGeminiKey)}`,
           {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
@@ -1336,7 +1361,8 @@ Responde ÚNICAMENTE con un JSON válido con esta estructura exacta (sin markdow
               generationConfig: {
                 responseMimeType: 'application/json',
                 temperature: 0.1,
-                maxOutputTokens: 4096
+                topP: 0.8,
+                maxOutputTokens: 8192
               }
             })
           }
@@ -1360,8 +1386,19 @@ Responde ÚNICAMENTE con un JSON válido con esta estructura exacta (sin markdow
               providerUsed: `Gemini Vision (${model})`
             };
           }
+        } else {
+          const errBody = await response.text();
+          lastGeminiError = `HTTP ${response.status} (${model}): ${errBody.slice(0, 180)}`;
         }
-      } catch {}
+      } catch (err: any) {
+        lastGeminiError = err?.message || String(err);
+      }
+    }
+
+    if (engine === 'gemini') {
+      throw new Error(
+        `Gemini Vision no pudo responder (${lastGeminiError || 'error de API'}). Verifica tu API Key de Google AI Studio o cambia al motor "100% Local (Ollama / OCR)".`
+      );
     }
   }
 
@@ -1405,7 +1442,7 @@ Responde ÚNICAMENTE con un JSON válido con esta estructura exacta (sin markdow
     ocrText,
     summary: ocrText.trim()
       ? `Leí este texto en la imagen pero no reconocí bloques de clases completos: "${ocrText.trim().slice(0, 140)}".`
-      : 'No pude leer texto legible en esta imagen. Intenta subir una captura más nítida o instalar un modelo de visión local en Ollama (llama3.2-vision).',
+      : 'No pude leer texto legible en esta imagen. Prueba cambiar a "Gemini Vision" (con una API Key válida) o usar Ollama Vision local (llama3.2-vision).',
     providerUsed: 'OCR Visual Local (Tesseract.js)'
   };
 }

@@ -22,8 +22,26 @@ export const DiagramPhotoScanner: React.FC<DiagramPhotoScannerProps> = ({
   const [scanError, setScanError] = useState<string | null>(null);
   const [photoHint, setPhotoHint] = useState('');
   const [editPrompt, setEditPrompt] = useState('');
+  const [scanEngine, setScanEngine] = useState<'auto' | 'gemini' | 'local'>('auto');
+  const [geminiKeyInput, setGeminiKeyInput] = useState<string>(() => {
+    try {
+      const raw = localStorage.getItem('case_ai_senior_config_v1');
+      return raw ? JSON.parse(raw)?.googleApiKey || '' : '';
+    } catch {
+      return '';
+    }
+  });
   const fileInputRef = useRef<HTMLInputElement>(null);
   const cameraInputRef = useRef<HTMLInputElement>(null);
+
+  const handleGeminiKeyChange = (val: string) => {
+    setGeminiKeyInput(val);
+    try {
+      const raw = localStorage.getItem('case_ai_senior_config_v1');
+      const current = raw ? JSON.parse(raw) : {};
+      localStorage.setItem('case_ai_senior_config_v1', JSON.stringify({ ...current, googleApiKey: val.trim() }));
+    } catch {}
+  };
 
   const loadImageFile = (file: File) => {
     const reader = new FileReader();
@@ -58,9 +76,17 @@ export const DiagramPhotoScanner: React.FC<DiagramPhotoScannerProps> = ({
     if (!imagePreview) return;
     setIsAnalyzing(true);
     setScanError(null);
+    setScanResult(null);
     try {
-      const result = await processDiagramPhoto(imagePreview, photoHint);
-      setScanResult(result);
+      const result = await processDiagramPhoto(imagePreview, photoHint, [], {
+        engine: scanEngine,
+        customGeminiApiKey: geminiKeyInput
+      });
+      if (result.entities.length === 0) {
+        setScanError(result.summary);
+      } else {
+        setScanResult(result);
+      }
     } catch (err: any) {
       console.error('Error scanning photo:', err);
       setScanError(err?.message ?? 'Error desconocido al analizar la imagen.');
@@ -161,19 +187,80 @@ export const DiagramPhotoScanner: React.FC<DiagramPhotoScannerProps> = ({
         position: 'relative'
       }}>
         {/* Header */}
-        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 16, borderBottom: '1px solid var(--border-subtle)', paddingBottom: 12 }}>
+        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 14, borderBottom: '1px solid var(--border-subtle)', paddingBottom: 12 }}>
           <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
             <div style={{ background: 'var(--grad-primary)', width: 34, height: 34, borderRadius: 8, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
               <Camera size={18} color="#fff" />
             </div>
             <div>
-              <h2 style={{ fontSize: 16, fontWeight: 700, margin: 0 }}>Foto a Diagrama UML 2.5 + Edición con IA Local</h2>
+              <h2 style={{ fontSize: 16, fontWeight: 700, margin: 0 }}>Foto a Diagrama UML 2.5 + Edición con IA</h2>
               <p style={{ fontSize: 11, color: 'var(--text-muted)', margin: 0 }}>
-                Toma o sube una foto de un diagrama de clases para digitalizarlo, editarlo con IA y cargarlo al lienzo general
+                Digitaliza con Gemini Vision o IA Local (Ollama / OCR), edita clases y cárgalo al lienzo
               </p>
             </div>
           </div>
           <button className="btn-icon" onClick={onClose}><X size={16} /></button>
+        </div>
+
+        {/* Selector de Motor de Visión (Cambiable en 1 clic: Auto / Gemini / Local) */}
+        <div style={{
+          display: 'flex',
+          flexDirection: 'column',
+          gap: 8,
+          marginBottom: 14,
+          padding: 10,
+          borderRadius: 10,
+          background: 'rgba(15, 23, 42, 0.7)',
+          border: '1px solid var(--border-subtle)'
+        }}>
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 6 }}>
+            {[
+              { id: 'auto', label: 'Automático', sub: 'Ollama / Gemini / OCR' },
+              { id: 'gemini', label: 'Gemini Vision', sub: 'Alta precisión (API Key)' },
+              { id: 'local', label: '100% Local', sub: 'Ollama Vision / OCR' }
+            ].map(item => {
+              const active = scanEngine === item.id;
+              return (
+                <button
+                  key={item.id}
+                  type="button"
+                  onClick={() => {
+                    setScanEngine(item.id as any);
+                    setScanError(null);
+                  }}
+                  style={{
+                    padding: '6px 8px',
+                    borderRadius: 8,
+                    textAlign: 'left',
+                    cursor: 'pointer',
+                    background: active ? 'rgba(99, 102, 241, 0.25)' : 'rgba(255,255,255,0.03)',
+                    border: `1px solid ${active ? '#818cf8' : 'var(--border-subtle)'}`,
+                    color: '#fff'
+                  }}
+                >
+                  <div style={{ fontSize: 11, fontWeight: 700 }}>{item.label}</div>
+                  <div style={{ fontSize: 9, color: active ? '#c7d2fe' : 'var(--text-muted)' }}>{item.sub}</div>
+                </button>
+              );
+            })}
+          </div>
+          {(scanEngine === 'gemini' || scanEngine === 'auto') && (
+            <input
+              type="password"
+              value={geminiKeyInput}
+              onChange={e => handleGeminiKeyChange(e.target.value)}
+              placeholder="Gemini API Key opcional (usa la de .env si la dejas vacía, o pega una AIzaSy...)"
+              style={{
+                width: '100%',
+                padding: '6px 10px',
+                borderRadius: 6,
+                fontSize: 11,
+                background: 'rgba(0,0,0,0.4)',
+                border: '1px solid rgba(99, 102, 241, 0.35)',
+                color: '#fff'
+              }}
+            />
+          )}
         </div>
 
         {/* Upload Area */}
@@ -282,7 +369,17 @@ export const DiagramPhotoScanner: React.FC<DiagramPhotoScannerProps> = ({
               disabled={isAnalyzing}
             >
               <Sparkles size={16} />
-              <span>{isAnalyzing ? 'Digitalizando con Visión IA Local...' : 'Digitalizar Diagrama con IA Local'}</span>
+              <span>
+                {isAnalyzing
+                  ? scanEngine === 'gemini'
+                    ? 'Analizando con Gemini Vision...'
+                    : 'Digitalizando diagrama...'
+                  : scanEngine === 'gemini'
+                  ? 'Digitalizar con Gemini Vision'
+                  : scanEngine === 'local'
+                  ? 'Digitalizar con IA Local'
+                  : 'Digitalizar Diagrama con IA'}
+              </span>
             </button>
           </div>
         )}
@@ -316,9 +413,16 @@ export const DiagramPhotoScanner: React.FC<DiagramPhotoScannerProps> = ({
             flexDirection: 'column',
             gap: 10
           }}>
-            <div style={{ display: 'flex', alignItems: 'center', gap: 8, color: '#34d399', fontWeight: 700, fontSize: 13 }}>
-              <CheckCircle2 size={16} />
-              <span>¡Diagrama Reconocido ({scanResult.entities?.length || 0} clases)!</span>
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8, flexWrap: 'wrap' }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 8, color: '#34d399', fontWeight: 700, fontSize: 13 }}>
+                <CheckCircle2 size={16} />
+                <span>¡Diagrama Reconocido ({scanResult.entities?.length || 0} clases)!</span>
+              </div>
+              {scanResult.providerUsed && (
+                <span style={{ fontSize: 10, background: 'rgba(99, 102, 241, 0.2)', color: '#a5b4fc', padding: '2px 8px', borderRadius: 6, fontWeight: 600 }}>
+                  {scanResult.providerUsed}
+                </span>
+              )}
             </div>
             <p style={{ fontSize: 12, color: '#f8fafc', margin: 0 }}>
               {scanResult.summary}
