@@ -659,13 +659,71 @@ function extractAndApplyLLMPatch(
   patchProposal?: { entities: Entity[]; relationships: Relationship[]; summary: string };
 } {
   const match = rawText.match(/<DIAGRAM_PATCH>([\s\S]*?)<\/DIAGRAM_PATCH>/i);
-  if (!match) return { cleanText: rawText };
+  if (!match) {
+    // Red de seguridad: si el LLM local afirmó en texto que agregó/creó una clase nueva sin emitir <DIAGRAM_PATCH>, sintetizarla automáticamente
+    const claimedEntityMatch = rawText.match(
+      /(?:clase|entidad|tabla)\s+(?:\*\*|`)?([A-ZÁÉÍÓÚÑ][a-zA-Z0-9_]{2,})(?:\*\*|`)?\s+(?:se\s+ha\s+agregado|ha\s+sido\s+(?:agregada|creada)|fue\s+(?:agregada|creada)|agregada\s+al)/i
+    );
+    const definedEntityMatch = rawText.match(
+      /^[-•*]\s*([A-ZÁÉÍÓÚÑ][a-zA-Z0-9_]{2,})\s*\(tabla:\s*([a-zA-Z0-9_]+)\)\s*:\s*\[([^\]]+)\]/m
+    );
+    const candidateName = claimedEntityMatch?.[1] || definedEntityMatch?.[1];
+    if (candidateName && !model.entities.some(e => e.name.toLowerCase() === candidateName.toLowerCase())) {
+      const parsedAttrs: Attribute[] = [];
+      if (definedEntityMatch?.[3] && definedEntityMatch[1].toLowerCase() === candidateName.toLowerCase()) {
+        definedEntityMatch[3].split(',').forEach((tok, idx) => {
+          const m = tok.trim().match(/^([a-zA-Z0-9_]+)\s*:\s*([a-zA-Z0-9_]+)?/);
+          if (m?.[1]) {
+            parsedAttrs.push({
+              id: `at_llm_syn_${Date.now()}_${idx}`,
+              name: m[1],
+              type: ((m[2] || 'VARCHAR').toUpperCase().replace(/[^A-Z]/g, '') || 'VARCHAR') as Attribute['type'],
+              isPrimaryKey: tok.includes('(PK)') || m[1].toLowerCase() === 'id',
+              isForeignKey: tok.includes('(FK)') || m[1].toLowerCase().endsWith('_id'),
+              isNullable: false
+            });
+          }
+        });
+      }
+      if (parsedAttrs.length === 0) {
+        parsedAttrs.push(
+          { id: `at_llm_syn_${Date.now()}_pk`, name: 'id', type: 'BIGINT', isPrimaryKey: true, isNullable: false },
+          { id: `at_llm_syn_${Date.now()}_nom`, name: 'estado', type: 'VARCHAR', length: 40, isPrimaryKey: false, isNullable: false },
+          { id: `at_llm_syn_${Date.now()}_fec`, name: 'fechaRegistro', type: 'TIMESTAMP', isPrimaryKey: false, isNullable: false }
+        );
+      }
+      const newEnt: Entity = {
+        id: `ent_llm_syn_${Date.now()}`,
+        name: candidateName,
+        tableName: definedEntityMatch?.[2] || candidateName.toLowerCase(),
+        x: 120 + (model.entities.length % 3) * 310,
+        y: 120 + Math.floor(model.entities.length / 3) * 240,
+        attributes: parsedAttrs
+      };
+      return {
+        cleanText: rawText,
+        patchProposal: {
+          entities: [...model.entities, newEnt],
+          relationships: model.relationships,
+          summary: `Agregar clase ${candidateName} al diagrama`
+        }
+      };
+    }
+    return { cleanText: rawText };
+  }
 
   const cleanText = rawText.replace(/<DIAGRAM_PATCH>[\s\S]*?<\/DIAGRAM_PATCH>/gi, '').trim();
   try {
     const patch = JSON.parse(match[1].trim());
     let entities = model.entities.map(e => ({ ...e, attributes: [...e.attributes] }));
     let relationships = [...model.relationships];
+
+    if (Array.isArray(patch.deleteEntities) && patch.deleteEntities.length > 0) {
+      const delNames = new Set(patch.deleteEntities.map((n: any) => String(n).toLowerCase()));
+      const delIds = new Set(entities.filter(e => delNames.has(e.name.toLowerCase())).map(e => e.id));
+      entities = entities.filter(e => !delIds.has(e.id));
+      relationships = relationships.filter(r => !delIds.has(r.sourceEntityId) && !delIds.has(r.targetEntityId));
+    }
 
     if (Array.isArray(patch.addEntities)) {
       patch.addEntities.forEach((ne: any, idx: number) => {
@@ -791,7 +849,7 @@ export function buildSeniorSystemPrompt(params: {
       ? `\nPROPUESTA LISTA EN EL BOTÓN DE ABAJO: "${pendingProposalSummary}". Explica brevemente este cambio y dile que puede aplicarlo con el botón verde de abajo.`
       : ''
     : config.mode !== 'mentor'
-    ? `\nSi el usuario pide explícitamente agregar o modificar clases, atributos o relaciones en el diagrama y no es solo una duda conceptual, puedes incluir al final de tu respuesta un bloque JSON exacto así (solo si realmente pide modificar el diagrama):\n<DIAGRAM_PATCH>{"addEntities":[],"addAttributes":[{"entityName":"Clase","name":"campo","type":"VARCHAR","isPrimaryKey":false,"isForeignKey":false}],"addRelationships":[{"source":"A","target":"B","cardinality":"1:N","type":"association","name":"tiene"}],"summary":"Resumen breve"}</DIAGRAM_PATCH>`
+    ? `\nSi el usuario pide agregar, crear, eliminar o modificar clases, atributos o relaciones en el diagrama, DEBES incluir al final un bloque JSON exacto así (NO digas "ya se agregó" a menos que incluyas este bloque):\n<DIAGRAM_PATCH>{"addEntities":[{"name":"NuevaClase","attributes":[{"name":"id","type":"BIGINT","isPrimaryKey":true},{"name":"nombre","type":"VARCHAR"}]}],"addAttributes":[],"addRelationships":[],"deleteEntities":[],"summary":"Resumen breve"}</DIAGRAM_PATCH>`
     : '';
 
   return `Eres el Desarrollador Senior del equipo (Arq. IA Senior) dentro de la plataforma CASE Enterprise Studio.
@@ -1194,12 +1252,9 @@ export async function generateSeniorMentorReply(params: {
     normalizedPrompt.includes('propiedad') ||
     ((normalizedPrompt.includes('falta') ||
       normalizedPrompt.includes('aumentar') ||
-      normalizedPrompt.includes('agregar') ||
-      normalizedPrompt.includes('anadir') ||
       normalizedPrompt.includes('recomienda') ||
       normalizedPrompt.includes('sugiere')) &&
-      !normalizedPrompt.includes('nueva tabla') &&
-      !normalizedPrompt.includes('nueva clase'));
+      !/\b(clase|clases|entidad|entidades|tabla|tablas)\b/.test(normalizedPrompt));
 
   const isAskingAboutMissingClasses =
     (normalizedPrompt.includes('que clase') ||

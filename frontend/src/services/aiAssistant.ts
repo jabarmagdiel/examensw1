@@ -445,7 +445,9 @@ export function executeVoiceCommand(
   }
 
   // 8. COMANDO: Crear Nueva Entidad / Clase
-  const addEntityMatch = cleanText.match(/(?:crear?|agrega(?:r)?|anad(?:ir|e)|inserta(?:r)?)\s+(?:la\s+)?(?:entidad|clase|tabla)\s+([a-zA-Z0-9_]+)(?:\s+(?:con\s+atributos?|con\s+campos?|con)\s+(.+))?/i);
+  const addEntityMatch = cleanText.match(
+    /(?:crea(?:r|me)?|agrega(?:r|me|le)?|aumenta(?:r|me|le)?|anad(?:ir|e)|inserta(?:r)?|pon(?:er|me|le)?|genera(?:r)?)\s+(?:(?:la|una|el|un)\s+)?(?:entidad|clase|tabla)\s+(?:llamada\s+|llamado\s+|de\s+)?([a-zA-Z0-9_]+)(?:\s+(?:con\s+atributos?|con\s+campos?|con)\s+(.+))?/i
+  );
   if (addEntityMatch) {
     const rawName = addEntityMatch[1];
     const entityName = rawName.charAt(0).toUpperCase() + rawName.slice(1);
