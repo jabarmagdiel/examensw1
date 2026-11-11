@@ -533,42 +533,46 @@ function parseEnterpriseArchitectRecursive(root: any): { success: boolean; model
   let modelName = 'Modelo Enterprise Architect';
 
   // Buscar recursivamente todas las clases y paquetes
-  function findClassesAndPackages(node: any) {
+  function findClassesAndPackages(node: any, parentKey = '') {
     if (!node || typeof node !== 'object') return;
 
     // Detectar nombre del modelo
     if (node['@_name'] && !modelName.includes('(')) {
-      if (node['@_xmi:type'] === 'uml:Model' || node['@_xmi:type'] === 'uml:Package') {
+      if (node['@_xmi:type'] === 'uml:Model' || node['@_xmi:type'] === 'uml:Package' || parentKey === 'UML:Model') {
         modelName = node['@_name'];
       }
     }
 
-    // Caso XMI 2.1 / UML 2.x (<packagedElement xmi:type="uml:Class">)
+    // Caso XMI 2.x / UML 2.x (<packagedElement xmi:type="uml:Class|uml:Interface">)
     const type = node['@_xmi:type'] || node['@_type'] || '';
-    if (type === 'uml:Class' || type === 'Class') {
-      const originalId = node['@_xmi:id'] || node['@_id'];
-      if (originalId && node['@_name']) {
+    if (type === 'uml:Class' || type === 'Class' || type === 'uml:Interface') {
+      const originalId = node['@_xmi:id'] || node['@_id'] || node['@_xmi:idref'];
+      if (originalId && node['@_name'] && !classNodeMap.has(originalId)) {
         classNodeMap.set(originalId, node);
       }
     }
 
-    // Caso XMI 1.1 (<UML:Class xmi.id="...">)
-    if (node['@_xmi.id'] && (node['@_name'] || node['name'])) {
+    // Caso XMI 1.1 (<UML:Class xmi.id="...">) — solo si el tag es UML:Class
+    if (parentKey === 'UML:Class' && node['@_xmi.id'] && (node['@_name'] || node['name'])) {
       const origId = node['@_xmi.id'];
-      classNodeMap.set(origId, {
-        '@_name': node['@_name'] || node['name'],
-        '@_xmi:id': origId,
-        'ownedAttribute': node['UML:Classifier.feature']?.['UML:Attribute'] || node['ownedAttribute']
-      });
+      if (!classNodeMap.has(origId)) {
+        classNodeMap.set(origId, {
+          '@_name': node['@_name'] || node['name'],
+          '@_xmi:id': origId,
+          'ownedAttribute': node['UML:Classifier.feature']?.['UML:Attribute'] || node['ownedAttribute'],
+          'ownedOperation': node['UML:Classifier.feature']?.['UML:Operation'] || node['ownedOperation']
+        });
+      }
     }
 
     // Recorrer arrays y objetos hijos
     for (const key of Object.keys(node)) {
+      if (key === 'xmi:Extension') continue; // Las extensiones se procesan aparte para no duplicar nodos
       const child = node[key];
       if (Array.isArray(child)) {
-        child.forEach(item => findClassesAndPackages(item));
+        child.forEach(item => findClassesAndPackages(item, key));
       } else if (typeof child === 'object') {
-        findClassesAndPackages(child);
+        findClassesAndPackages(child, key);
       }
     }
   }
@@ -582,13 +586,15 @@ function parseEnterpriseArchitectRecursive(root: any): { success: boolean; model
     if (extElements) {
       const list = Array.isArray(extElements) ? extElements : [extElements];
       list.forEach((elem: any) => {
-        if (elem['@_xmi:type'] === 'uml:Class' || elem['@_sType'] === 'Class') {
+        if (elem['@_xmi:type'] === 'uml:Class' || elem['@_sType'] === 'Class' || elem?.properties?.['@_sType'] === 'Class') {
           const origId = elem['@_xmi:idref'] || elem['@_xmi:id'] || elem['@_name'];
-          classNodeMap.set(origId, {
-            '@_name': elem['@_name'],
-            '@_xmi:id': origId,
-            'ownedAttribute': elem['attributes']?.['attribute']
-          });
+          if (origId && elem['@_name']) {
+            classNodeMap.set(origId, {
+              '@_name': elem['@_name'],
+              '@_xmi:id': origId,
+              'ownedAttribute': elem['attributes']?.['attribute']
+            });
+          }
         }
       });
     }
@@ -721,8 +727,8 @@ function parseEnterpriseArchitectRecursive(root: any): { success: boolean; model
     });
   });
 
-  // Buscar relaciones, asociaciones, dependencias y realizaciones UML 2.5 / 2.1
-  function findAssociations(node: any) {
+  // Buscar relaciones, asociaciones, dependencias y realizaciones UML 2.5 / 2.1 / 1.1
+  function findAssociations(node: any, parentKey = '') {
     if (!node || typeof node !== 'object') return;
 
     const type = node['@_xmi:type'] || node['@_type'] || '';
@@ -762,6 +768,28 @@ function parseEnterpriseArchitectRecursive(root: any): { success: boolean; model
           });
         }
       }
+    } else if (parentKey === 'UML:Association') {
+      let ends = node['UML:Association.connection']?.['UML:AssociationEnd'] || [];
+      if (!Array.isArray(ends)) ends = [ends];
+      if (ends.length >= 2) {
+        const srcId = entityIdMap.get(ends[0]['@_type']);
+        const tgtId = entityIdMap.get(ends[1]['@_type']);
+        if (srcId && tgtId) {
+          const m1 = String(ends[0]['@_multiplicity'] || '1');
+          const m2 = String(ends[1]['@_multiplicity'] || '1');
+          let cardinality: Cardinality = '1:N';
+          if (m1.includes('*') && m2.includes('*')) cardinality = 'N:M';
+          else if (!m1.includes('*') && !m2.includes('*')) cardinality = '1:1';
+          relationships.push({
+            id: `rel_${Math.random().toString(36).substr(2, 9)}`,
+            name: node['@_name'] || '',
+            sourceEntityId: srcId,
+            targetEntityId: tgtId,
+            cardinality,
+            type: 'association'
+          });
+        }
+      }
     } else if (type === 'uml:Dependency' || type === 'uml:Realization' || type === 'uml:InterfaceRealization') {
       const srcId = entityIdMap.get(node['@_client']);
       const tgtId = entityIdMap.get(node['@_supplier']);
@@ -778,13 +806,59 @@ function parseEnterpriseArchitectRecursive(root: any): { success: boolean; model
     }
 
     for (const key of Object.keys(node)) {
+      if (key === 'xmi:Extension') continue;
       const child = node[key];
-      if (Array.isArray(child)) child.forEach(findAssociations);
-      else if (typeof child === 'object') findAssociations(child);
+      if (Array.isArray(child)) child.forEach(item => findAssociations(item, key));
+      else if (typeof child === 'object') findAssociations(child, key);
     }
   }
 
   findAssociations(root);
+
+  // Respaldo Sparx Enterprise Architect: si no encontró relaciones en UML estándar, leer <xmi:Extension><connectors><connector>
+  if (relationships.length === 0) {
+    const extConns = root?.['xmi:XMI']?.['xmi:Extension']?.['connectors']?.['connector'];
+    if (extConns) {
+      const cList = Array.isArray(extConns) ? extConns : [extConns];
+      cList.forEach((conn: any) => {
+        const srcRef = conn?.source?.['@_xmi:idref'] || conn?.source?.model?.['@_name'];
+        const tgtRef = conn?.target?.['@_xmi:idref'] || conn?.target?.model?.['@_name'];
+        const srcId = entityIdMap.get(srcRef);
+        const tgtId = entityIdMap.get(tgtRef);
+        if (srcId && tgtId) {
+          const eaType = String(conn?.properties?.['@_ea_type'] || 'Association').toLowerCase();
+          const subType = String(conn?.properties?.['@_subtype'] || '').toLowerCase();
+          const m1 = String(conn?.source?.type?.['@_multiplicity'] || '1');
+          const m2 = String(conn?.target?.type?.['@_multiplicity'] || '1');
+          let cardinality: Cardinality = '1:N';
+          if (m1.includes('*') && m2.includes('*')) cardinality = 'N:M';
+          else if (!m1.includes('*') && !m2.includes('*')) cardinality = '1:1';
+
+          const relType =
+            eaType.includes('generali')
+              ? 'inheritance'
+              : eaType.includes('depend')
+              ? 'dependency'
+              : eaType.includes('realis') || eaType.includes('realiz')
+              ? 'realization'
+              : eaType.includes('aggreg')
+              ? subType === 'strong'
+                ? 'composition'
+                : 'aggregation'
+              : 'association';
+
+          relationships.push({
+            id: `rel_${Math.random().toString(36).substr(2, 9)}`,
+            name: conn?.['@_name'] || '',
+            sourceEntityId: srcId,
+            targetEntityId: tgtId,
+            cardinality,
+            type: relType
+          });
+        }
+      });
+    }
+  }
 
   if (entities.length === 0) {
     return {

@@ -712,8 +712,18 @@ export default function App() {
     saveGroupChatMessages(currentModel.id, initial);
   };
 
-  const handleImportArchitectModel = (newModel: DiagramModel, message: string) => {
-    broadcastModelChange(newModel, 'import_architect');
+  const handleImportArchitectModel = (newModel: DiagramModel, _message: string) => {
+    const mergedModel: DiagramModel = {
+      ...currentModel,
+      entities: newModel.entities,
+      relationships: newModel.relationships,
+      functionalDependencies: newModel.functionalDependencies || [],
+      updatedAt: Date.now(),
+      version: (currentModel.version || 1) + 1
+    };
+    broadcastModelChange(mergedModel, 'import_architect');
+    setSelectedEntityId(null);
+    setActiveModule('canvas');
   };
 
   // Manejadores de Gestión de Usuarios y Roles PUDS

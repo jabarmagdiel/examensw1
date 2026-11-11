@@ -41,6 +41,7 @@ export const ArchitectModal: React.FC<ArchitectModalProps> = ({
   const [selectedFormat, setSelectedFormat] = useState<'ea_uml25' | 'ea_xmi21' | 'ea_xmi11' | 'archi_xml'>('ea_uml25');
   const [importStatus, setImportStatus] = useState<{ success?: boolean; message?: string } | null>(null);
   const [copied, setCopied] = useState(false);
+  const [isDragging, setIsDragging] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   // Contenido XML dinámico según el formato seleccionado
@@ -74,10 +75,7 @@ export const ArchitectModal: React.FC<ArchitectModalProps> = ({
     setTimeout(() => setCopied(false), 2000);
   };
 
-  const handleFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
-    if (!file) return;
-
+  const processImportedFile = (file: File) => {
     const reader = new FileReader();
     reader.onload = () => {
       const content = reader.result as string;
@@ -89,7 +87,28 @@ export const ArchitectModal: React.FC<ArchitectModalProps> = ({
         setImportStatus({ success: false, message: result.message });
       }
     };
+    reader.onerror = () => {
+      setImportStatus({ success: false, message: 'No se pudo leer el archivo seleccionado.' });
+    };
     reader.readAsText(file);
+  };
+
+  const handleFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (file) {
+      processImportedFile(file);
+    }
+    e.target.value = '';
+  };
+
+  const handleDropFile = (e: React.DragEvent<HTMLDivElement>) => {
+    e.preventDefault();
+    e.stopPropagation();
+    setIsDragging(false);
+    const file = e.dataTransfer.files?.[0];
+    if (file) {
+      processImportedFile(file);
+    }
   };
 
   // Cargar ejemplo de Enterprise Architect UML 2.5 para pruebas inmediatas en 1 clic
@@ -371,29 +390,40 @@ export const ArchitectModal: React.FC<ArchitectModalProps> = ({
               type="file"
               ref={fileInputRef}
               onChange={handleFileUpload}
-              accept=".xml,.xmi"
+              accept=".xml,.xmi,.uml,.eapx"
               style={{ display: 'none' }}
             />
 
             {/* Zona Drag & Drop */}
             <div
               onClick={() => fileInputRef.current?.click()}
+              onDragOver={e => {
+                e.preventDefault();
+                e.stopPropagation();
+                setIsDragging(true);
+              }}
+              onDragLeave={e => {
+                e.preventDefault();
+                e.stopPropagation();
+                setIsDragging(false);
+              }}
+              onDrop={handleDropFile}
               style={{
-                border: '2px dashed #06b6d4',
+                border: `2px dashed ${isDragging ? '#10b981' : '#06b6d4'}`,
                 borderRadius: 12,
                 padding: '36px 20px',
                 textAlign: 'center',
-                background: 'rgba(6, 182, 212, 0.05)',
+                background: isDragging ? 'rgba(16, 185, 129, 0.12)' : 'rgba(6, 182, 212, 0.05)',
                 cursor: 'pointer',
                 transition: 'all 0.2s ease'
               }}
             >
-              <Upload size={36} color="#06b6d4" style={{ margin: '0 auto 12px' }} />
+              <Upload size={36} color={isDragging ? '#10b981' : '#06b6d4'} style={{ margin: '0 auto 12px' }} />
               <div style={{ fontSize: 14, fontWeight: 600, color: '#f8fafc', marginBottom: 4 }}>
-                Selecciona o arrastra tu archivo .XMI o .XML de Enterprise Architect
+                Selecciona o arrastra aquí tu archivo .XMI o .XML de Enterprise Architect
               </div>
               <p style={{ fontSize: 12, color: '#94a3b8', margin: 0 }}>
-                Compatible con XMI 2.1, XMI 1.1, Sparx Native XML y Archi Open Exchange
+                Compatible con UML 2.5 (XMI 2.5.1), XMI 2.1, XMI 1.1, Sparx Native XML y Archi Open Exchange
               </p>
             </div>
 
@@ -434,12 +464,24 @@ export const ArchitectModal: React.FC<ArchitectModalProps> = ({
                 border: `1px solid ${importStatus.success ? '#10b981' : '#ef4444'}`,
                 display: 'flex',
                 alignItems: 'center',
+                justifyContent: 'space-between',
                 gap: 10,
                 color: importStatus.success ? '#6ee7b7' : '#fca5a5',
                 fontSize: 12
               }}>
-                {importStatus.success ? <CheckCircle2 size={18} /> : <AlertCircle size={18} />}
-                <span>{importStatus.message}</span>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+                  {importStatus.success ? <CheckCircle2 size={18} /> : <AlertCircle size={18} />}
+                  <span>{importStatus.message}</span>
+                </div>
+                {importStatus.success && (
+                  <button
+                    className="btn-primary"
+                    onClick={onClose}
+                    style={{ fontSize: 11, padding: '5px 12px', whiteSpace: 'nowrap' }}
+                  >
+                    Ver en el Lienzo
+                  </button>
+                )}
               </div>
             )}
           </div>
