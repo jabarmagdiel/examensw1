@@ -7,6 +7,15 @@ export function registerPresenceHandlers(io, socket) {
   // Unirse a un proyecto/sala
   socket.on('join_project', ({ roomId, user }) => {
     if (!roomId) return;
+
+    // Abandonar salas de proyectos previos para no recibir mensajes cruzados
+    socket.rooms.forEach((existingRoom) => {
+      if (existingRoom !== socket.id && existingRoom !== roomId) {
+        socket.leave(existingRoom);
+        roomService.removeUserFromRoom(existingRoom, socket.id);
+      }
+    });
+
     socket.join(roomId);
 
     const { room, user: registeredUser } = roomService.addUserToRoom(roomId, socket.id, user);
@@ -32,13 +41,23 @@ export function registerPresenceHandlers(io, socket) {
   // Chat Grupal Colaborativo + Respuestas del Senior AI Mentor
   socket.on('group_chat_send', ({ roomId, message }) => {
     if (!roomId || !message) return;
+    if (!socket.rooms.has(roomId)) socket.join(roomId);
     roomService.addChatMessage(roomId, message);
     socket.to(roomId).emit('group_chat_message', { roomId, message });
+  });
+
+  // Limpiar historial del Chat Grupal sincronizado
+  socket.on('group_chat_clear', ({ roomId, messages }) => {
+    if (!roomId) return;
+    const room = roomService.getOrCreateRoom(roomId);
+    room.chatMessages = Array.isArray(messages) ? [...messages] : [];
+    socket.to(roomId).emit('group_chat_cleared', { roomId, messages: room.chatMessages });
   });
 
   // Cambio de configuración del Senior AI Mentor compartido en la sala
   socket.on('ai_config_change', ({ roomId, config }) => {
     if (!roomId || !config) return;
+    if (!socket.rooms.has(roomId)) socket.join(roomId);
     roomService.updateAIConfig(roomId, config);
     socket.to(roomId).emit('ai_config_sync', { roomId, config });
   });

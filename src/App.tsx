@@ -288,6 +288,42 @@ export default function App() {
 
   // Proyecto activo actual
   const currentModel = projects.find(p => p.id === activeProjectId) || projects[0] || INITIAL_PROJECTS[0];
+  const activeProjectIdRef = useRef<string>(currentModel.id);
+  const currentUserRef = useRef<UserPresence>(currentUser);
+  const broadcastChannelRef = useRef<BroadcastChannel | null>(null);
+
+  useEffect(() => {
+    activeProjectIdRef.current = currentModel.id;
+  }, [currentModel.id]);
+
+  useEffect(() => {
+    currentUserRef.current = currentUser;
+  }, [currentUser]);
+
+  // Canal en tiempo real entre pestañas del mismo navegador (útil en pruebas locales o doble pestaña)
+  useEffect(() => {
+    if (typeof BroadcastChannel === 'undefined') return;
+    const channel = new BroadcastChannel('case_ai_realtime_sync');
+    broadcastChannelRef.current = channel;
+    channel.onmessage = (event) => {
+      const payload = event.data;
+      if (!payload || !payload.type) return;
+      if (payload.type === 'group_chat_message' && payload.roomId === activeProjectIdRef.current && payload.message) {
+        setGroupChatMessages(prev => (prev.some(m => m.id === payload.message.id) ? prev : [...prev, payload.message]));
+      } else if (payload.type === 'model_updated' && payload.model) {
+        setProjects(prev => prev.map(p => (p.id === payload.model.id ? payload.model : p)));
+      } else if (payload.type === 'ai_config_sync' && payload.roomId === activeProjectIdRef.current && payload.config) {
+        setSeniorAIConfig(payload.config);
+        saveSeniorAIConfig(payload.config);
+      } else if (payload.type === 'group_chat_clear' && payload.roomId === activeProjectIdRef.current && Array.isArray(payload.messages)) {
+        setGroupChatMessages(payload.messages);
+      }
+    };
+    return () => {
+      channel.close();
+      broadcastChannelRef.current = null;
+    };
+  }, []);
 
   // Cargar estado inicial del Workspace compartido desde la API
   useEffect(() => {
@@ -317,16 +353,17 @@ export default function App() {
         (window.location.hostname === 'localhost' && window.location.port !== '3001' ? 'http://localhost:3001' : '/');
       const socket = io(socketUrl, {
         transports: ['websocket', 'polling'],
-        reconnectionAttempts: 5
+        reconnectionAttempts: Infinity
       });
 
       socketRef.current = socket;
 
       socket.on('connect', () => {
         socket.emit('workspace_get');
-        if (currentModel) {
-          socket.emit('join_project', { roomId: currentModel.id, user: currentUser });
-        }
+        socket.emit('join_project', {
+          roomId: activeProjectIdRef.current,
+          user: currentUserRef.current
+        });
       });
 
       // Sincronización completa de carpetas y proyectos
@@ -384,6 +421,12 @@ export default function App() {
         setCollaborators(prev => prev.map(u => u.id === userId ? { ...u, cursor } : u));
       });
 
+      socket.on('model_sync', ({ model: remoteModel }: any) => {
+        if (remoteModel) {
+          setProjects(prev => prev.map(p => p.id === remoteModel.id ? remoteModel : p));
+        }
+      });
+
       socket.on('model_updated', ({ model: remoteModel }: any) => {
         if (remoteModel) {
           setProjects(prev => prev.map(p => p.id === remoteModel.id ? remoteModel : p));
@@ -391,19 +434,35 @@ export default function App() {
       });
 
       // Eventos en tiempo real del Chat Grupal Colaborativo y Senior AI Mentor
-      socket.on('group_chat_sync', ({ messages: remoteMsgs }: { roomId: string; messages: GroupChatMessage[] }) => {
+      socket.on('group_chat_sync', ({ roomId, messages: remoteMsgs }: { roomId?: string; messages: GroupChatMessage[] }) => {
+        if (roomId && roomId !== activeProjectIdRef.current) return;
         if (Array.isArray(remoteMsgs) && remoteMsgs.length > 0) {
-          setGroupChatMessages(remoteMsgs);
+          setGroupChatMessages(prev => {
+            const merged = [...prev];
+            remoteMsgs.forEach(rm => {
+              if (!merged.some(m => m.id === rm.id)) merged.push(rm);
+            });
+            return merged.sort((a, b) => a.timestamp - b.timestamp);
+          });
         }
       });
 
-      socket.on('group_chat_message', ({ message }: { roomId: string; message: GroupChatMessage }) => {
+      socket.on('group_chat_message', ({ roomId, message }: { roomId?: string; message: GroupChatMessage }) => {
+        if (roomId && roomId !== activeProjectIdRef.current) return;
         if (message) {
           setGroupChatMessages(prev => (prev.some(m => m.id === message.id) ? prev : [...prev, message]));
         }
       });
 
-      socket.on('ai_config_sync', ({ config }: { roomId: string; config: SeniorAIConfig }) => {
+      socket.on('group_chat_cleared', ({ roomId, messages: initialMsgs }: { roomId?: string; messages?: GroupChatMessage[] }) => {
+        if (roomId && roomId !== activeProjectIdRef.current) return;
+        if (Array.isArray(initialMsgs)) {
+          setGroupChatMessages(initialMsgs);
+        }
+      });
+
+      socket.on('ai_config_sync', ({ roomId, config }: { roomId?: string; config: SeniorAIConfig }) => {
+        if (roomId && roomId !== activeProjectIdRef.current) return;
         if (config) {
           setSeniorAIConfig(config);
           saveSeniorAIConfig(config);
@@ -418,17 +477,18 @@ export default function App() {
     }
   }, []);
 
-  // Actualizar sala activa del socket al cambiar de proyecto
+  // Actualizar sala activa del socket al cambiar de proyecto o usuario
   useEffect(() => {
-    if (socketRef.current?.connected && currentModel) {
+    if (socketRef.current && currentModel) {
       socketRef.current.emit('join_project', { roomId: currentModel.id, user: currentUser });
     }
-  }, [activeProjectId, currentUser]);
+  }, [activeProjectId, currentModel.id, currentUser]);
 
   // Actualizar el modelo activo en la lista de proyectos y emitir por websocket
   const broadcastModelChange = (updatedModel: DiagramModel, changeType: string) => {
     setProjects(prev => prev.map(p => p.id === updatedModel.id ? updatedModel : p));
-    if (socketRef.current?.connected) {
+    broadcastChannelRef.current?.postMessage({ type: 'model_updated', model: updatedModel });
+    if (socketRef.current) {
       socketRef.current.emit('model_change', {
         roomId: updatedModel.id,
         model: updatedModel,
@@ -692,24 +752,33 @@ export default function App() {
 
   // Manejadores del Chat Grupal Colaborativo + Senior AI Mentor
   const handleSendGroupChatMessage = (message: GroupChatMessage) => {
+    const targetRoomId = message.projectId || activeProjectIdRef.current;
     setGroupChatMessages(prev => (prev.some(m => m.id === message.id) ? prev : [...prev, message]));
-    if (socketRef.current?.connected && currentModel) {
-      socketRef.current.emit('group_chat_send', { roomId: currentModel.id, message });
+    broadcastChannelRef.current?.postMessage({ type: 'group_chat_message', roomId: targetRoomId, message });
+    if (socketRef.current) {
+      socketRef.current.emit('group_chat_send', { roomId: targetRoomId, message });
     }
   };
 
   const handleUpdateSeniorAIConfig = (newConfig: SeniorAIConfig) => {
+    const targetRoomId = activeProjectIdRef.current;
     setSeniorAIConfig(newConfig);
     saveSeniorAIConfig(newConfig);
-    if (socketRef.current?.connected && currentModel) {
-      socketRef.current.emit('ai_config_change', { roomId: currentModel.id, config: newConfig });
+    broadcastChannelRef.current?.postMessage({ type: 'ai_config_sync', roomId: targetRoomId, config: newConfig });
+    if (socketRef.current) {
+      socketRef.current.emit('ai_config_change', { roomId: targetRoomId, config: newConfig });
     }
   };
 
   const handleClearGroupChat = () => {
-    const initial = getInitialTeamChat(currentModel.id);
+    const targetRoomId = activeProjectIdRef.current;
+    const initial = getInitialTeamChat(targetRoomId);
     setGroupChatMessages(initial);
-    saveGroupChatMessages(currentModel.id, initial);
+    saveGroupChatMessages(targetRoomId, initial);
+    broadcastChannelRef.current?.postMessage({ type: 'group_chat_clear', roomId: targetRoomId, messages: initial });
+    if (socketRef.current) {
+      socketRef.current.emit('group_chat_clear', { roomId: targetRoomId, messages: initial });
+    }
   };
 
   const handleImportArchitectModel = (newModel: DiagramModel, _message: string) => {
