@@ -18,7 +18,7 @@ export const DEFAULT_SENIOR_AI_CONFIG: SeniorAIConfig = {
   provider: 'local_llm',
   autoIntervene: true,
   googleApiKey: '',
-  googleModel: 'gemini-2.5-flash',
+  googleModel: 'gemini-3.5-flash',
   localEndpoint: 'http://localhost:11434/api/chat',
   localModel: 'llama3.2',
   temperature: 0.4
@@ -594,11 +594,10 @@ async function callGoogleGeminiAPI(
 
   const candidateModels = Array.from(
     new Set([
-      config.googleModel || 'gemini-3.8-flash',
-      'gemini-3.8-flash',
+      config.googleModel === 'gemini-2.5-flash' ? 'gemini-3.5-flash' : config.googleModel || 'gemini-3.5-flash',
       'gemini-3.5-flash',
-      'gemini-flash-latest',
-      'gemini-2.5-flash'
+      'gemini-3.8-flash',
+      'gemini-3.6-flash'
     ])
   );
 
